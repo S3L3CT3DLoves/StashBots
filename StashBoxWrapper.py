@@ -530,7 +530,7 @@ class StashBoxPerformerManager:
         edit : t.EditInput = {
             'operation' : 'CREATE',
             'comment' : comment,
-            'bot' : False
+            'bot' : True
         }
 
         input = {
@@ -555,7 +555,7 @@ class StashBoxPerformerManager:
             'operation' : 'MODIFY',
             'id' : performerId,
             'comment' : comment,
-            'bot' : False
+            'bot' : True
         }
 
         input = {
