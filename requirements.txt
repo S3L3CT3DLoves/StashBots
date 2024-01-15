@@ -1,0 +1,3 @@
+stashapp-tools
+gql_schema_codegen
+pycountry
