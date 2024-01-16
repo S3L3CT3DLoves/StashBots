@@ -7,7 +7,7 @@ from stashapi.stashapp import StashInterface
 
 siteMapper = StashBoxSitesMapper()
 
-def createPerformers(stash : StashInterface, source : StashSource, destination : StashSource, uploads : [PerformerUploadConfig]):
+def createPerformers(stash : StashInterface, source : StashSource, destination : StashSource, uploads : [PerformerUploadConfig], comment : str):
     stashFilter = StashBoxFilterManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[destination]['url']))
 
     print("Checking if performers are already added in Edits")
@@ -33,11 +33,11 @@ def createPerformers(stash : StashInterface, source : StashSource, destination :
                 "site_id" : siteMapper.SOURCE_INFOS[destination]['siteIds'][source]
             })
         
-        submitted = perfManager.submitPerformerCreate(createInput, "StashDB Scrape")
+        submitted = perfManager.submitPerformerCreate(createInput, comment)
 
         print(f"Performer Edit submitted : {siteMapper.SOURCE_INFOS[destination]['url']}/edits/{submitted['id']}")
 
-def updatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer):
+def updatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer, comment : str):
     sourceUrl = [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[source]['url'])][0]['url']
     sourceId = sourceUrl.split('/').pop()
     lastUpdate = stashDateToDateTime(performer["updated"])
@@ -73,7 +73,7 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
         updateInput["image_ids"] = newImgs + list(map(lambda x: x['id'],performer.get("images", [])))
 
 
-        perfManager.submitPerformerUpdate(performer["id"], updateInput, "[Test] Automated Bot Update")
+        perfManager.submitPerformerUpdate(performer["id"], updateInput, comment)
         return True
     else:
         print(f"Not updating {performer['name']}")
@@ -130,10 +130,12 @@ if __name__ == '__main__':
         Update mode : lists all Performers on TARGET that have a link to SOURCE, and updates them to mirror changes in SOURCE""",
         epilog="__StashBox_Perf_Mgr_v0.2__"
     )
-    parser.add_argument("-m", help="Options: c - CREATE / u - UPDATE", choices=['c', 'u', 't'], required=True)
+    parser.add_argument("-m", help="Options: c - CREATE / u - UPDATE", choices=['create', 'update'], required=True)
     parser.add_argument("-s", "--stash", help="Local Stash url to be used to get the Stashbox config", default="http://localhost:9999/")
     parser.add_argument("-tsb", "--target-stashbox", help="Target StashBox instance", choices=['STASHDB', 'PMVSTASH', "FANSDB"], required=True)
     parser.add_argument("-ssb", "--source-stashbox", help="Source StashBox instance", choices=['STASHDB', 'PMVSTASH', "FANSDB"], required=True)
+    parser.add_argument("-c", "--comment", help="Comment for StashBox Edits", default="[BOT] StashBox-PerformerBot Edit")
+    parser.add_argument("-l", "--limit", help="Maximum number of edits allowed (Update mode only)", type=int, default=100000)
 
     argv = sys.argv
     argv.pop(0)
@@ -159,7 +161,7 @@ if __name__ == '__main__':
 
     count = 0
 
-    if args.m == "u":
+    if args.m.lower() == "update":
         print("Update mode")
         # Update mode
         performersList = []
@@ -187,21 +189,17 @@ if __name__ == '__main__':
         #Now actually do the update
         plist = list(reversed(performersList))
         for performer in plist:
-            if updatePerformer(stash, SOURCE, TARGET, performer):
+            if updatePerformer(stash, SOURCE, TARGET, performer, args.comment):
                 count += 1
             
-            if count > 5:
+            if count >= args.limit:
                 print(f"{count} performers updated")
                 sys.exit()
+        
+        print(f"{count} performers updated")
 
-    elif args.m == "c":
+    elif args.m.lower() == "create":
         print("Creation mode")
-        createPerformers(stash, SOURCE, TARGET, getPerformerUploadsFromStash(stash))
-
-    elif args.m == "t":
-        print("Test mode")
-        mgr = StashBoxPerformerManager(stash, TARGET, SOURCE)
-        performer = mgr.getPerformer("c923efd2-2506-4eb2-a0b6-201172fa659d")
-        updatePerformer(stash, SOURCE, TARGET, performer)
+        createPerformers(stash, SOURCE, TARGET, getPerformerUploadsFromStash(stash), args.comment)
     
 

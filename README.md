@@ -22,9 +22,9 @@ PMVSTASH and STASHDB are currently implemented, FANSDB will be added soon
 
 ## Usual commands
 
-Create mode : `python .\PerfCrossUpload.py -m c -ssb STASHDB -tsb PMVSTASH -s http://localhost:9999/`
+Create mode : `python .\StashBox-PerformerBot.py -m create -ssb STASHDB -tsb PMVSTASH -s http://localhost:9999/ -c "[PBOT] StashDB Scrape"`
 
-Update mode : `python .\PerfCrossUpload.py -m u -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/`
+Update mode : `python .\StashBox-PerformerBot.py -m update -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update" -l 5`
 
 ---
 
