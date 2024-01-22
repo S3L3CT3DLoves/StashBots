@@ -371,10 +371,9 @@ class StashBoxPerformerManager:
 
     def getPerformer(self, performerId : str) -> t.Performer:
         """
-        Retrieves the performer from the specified stashBox, returns it and stores it in the Manager
+        Retrieves the performer, returns it and stores it in the Manager
 
         ### Parameters
-            - stashBoxEndpoint: Object describing the connection to the destination StashBox (obtained by calling StashInterface.get_stashbox_connection)
             - performerId (str): The performer's ID in the StashBox instance
 
         ### Returns
@@ -482,7 +481,8 @@ class StashBoxPerformerManager:
             birthdate = birthdate["date"]
         draftCreate["birthdate"] = birthdate
 
-        draftCreate["country"] = convertCountry(performer.get("country"))
+        if performer.get("country"):
+            draftCreate["country"] = convertCountry(performer.get("country"))
 
 
 
@@ -499,6 +499,7 @@ class StashBoxPerformerManager:
 
         ### Parameters
             - performer (t.Performer, optional): The performer that should be converted. (default: the stored performer)
+            - exclude ([str], optional): List of already uploaded images as base64, to avoid reuploading them
         """
         if performer == None:
             performer = self.performer
@@ -507,12 +508,11 @@ class StashBoxPerformerManager:
         counter = 0
         allImgs = performer.get("images", [])
         for image in allImgs:
-            if image['url'] not in exclude:
-                counter +=1
-                print(f"Uploading image {counter} of {len(allImgs)}")
-                imageId = upload_image(self.destinationEndpoint, image['url'], exclude)
-                if imageId:
-                    imageIds.append(imageId["id"])
+            counter +=1
+            print(f"Uploading image {counter} of {len(allImgs)}")
+            imageId = upload_image(self.destinationEndpoint, image['url'], exclude)
+            if imageId:
+                imageIds.append(imageId["id"])
         
         return imageIds
     
@@ -530,7 +530,7 @@ class StashBoxPerformerManager:
         edit : t.EditInput = {
             'operation' : 'CREATE',
             'comment' : comment,
-            'bot' : True
+            'bot' : False
         }
 
         input = {
@@ -540,7 +540,7 @@ class StashBoxPerformerManager:
 
         return callGraphQL(self.destinationEndpoint, gql, {'input' : input})['performerEdit']
     
-    def submitPerformerUpdate(self, performerId : str, performerInput : t.PerformerEditDetailsInput, comment : str) -> t.Edit:
+    def submitPerformerUpdate(self, performerId : str, performerInput : t.PerformerEditDetailsInput, comment : str, bot : bool = True) -> t.Edit:
         """
         """
 
@@ -555,7 +555,7 @@ class StashBoxPerformerManager:
             'operation' : 'MODIFY',
             'id' : performerId,
             'comment' : comment,
-            'bot' : True
+            'bot' : bot
         }
 
         input = {
@@ -888,8 +888,21 @@ class StashBoxPerformerHistory:
         localValue = localPerf.get("birth_date", localPerf.get("birthdate"))
         if compareValue and localValue:
             if compareValue != localValue:
-                print(f"Compare birthday: SOURCE:{localValue} and TARGET:{compareValue}")
-                return False
+                # TODO - Handle dates where day / month is missing (eg: 2002 vs 2002-01-01)
+                if len(compareValue) != len(localValue):
+                    # One of the dates is a short date, the other is not
+                    dateChecker = "^(\d{4})-01-01"
+                    if len(compareValue) == 4:
+                        localCheck = re.match(dateChecker, localValue)
+                        if compareValue != localCheck.group(1):
+                            return False
+                    elif len(localValue) == 4:
+                        check = re.match(dateChecker, compareValue)
+                        if localValue != check.group(1):
+                            return False
+                else:
+                    print(f"Compare birthday: SOURCE:{localValue} and TARGET:{compareValue}")
+                    return False
         elif compareValue and not localValue:
             print("Birthdate has been added to TARGET !")
             return False

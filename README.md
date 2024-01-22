@@ -24,7 +24,9 @@ PMVSTASH and STASHDB are currently implemented, FANSDB will be added soon
 
 Create mode : `python .\StashBox-PerformerBot.py -m create -ssb STASHDB -tsb PMVSTASH -s http://localhost:9999/ -c "[PBOT] StashDB Scrape"`
 
-Update mode : `python .\StashBox-PerformerBot.py -m update -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update" -l 5`
+Update mode : `python .\StashBox-PerformerBot.py -m update -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update" -l 5 -o manualcheck_output.csv`
+
+Manual mode : `python .\StashBox-PerformerBot.py -m manual -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update - Manually checked" -i manualcheck_output.csv`
 
 ---
 
@@ -45,3 +47,12 @@ The Bot only updates data if all the following conditions are met:
 - The performer in TARGET has a link to SOURCE
 - The performer in TARGET was never changed manually (it is an exact copy of SOURCE at the time of creation)
 - There are no ongoing Edits on the performer
+
+## Manual Update Mode
+In Manual Update mode, the Bot will take a list of performers from a CSV file (following the output format of Update mode).
+
+For all lines in the file where the last element is True, it will force the update of the performer, even if Update mode has failed it.
+
+This must only be used after a manual review of the list of performers has been done, to ensure no import data will be overwritten.
+
+Because this operation can be destructive, it will not be send in BOT mode, and will show up a normal Edit in StashBox.
