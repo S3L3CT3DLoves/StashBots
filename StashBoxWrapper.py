@@ -784,8 +784,9 @@ class StashBoxPerformerHistory:
         self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
         self.performerStates = {}
 
-        self.performerEdits = [edit for edit in self.performerEdits if edit['operation'] in ["MODIFY", "CREATE", "MERGE"]]
-        initial = self._getInitialState(self.performerEdits)
+        allEdits = [edit for edit in self.performerEdits if edit['operation'] in ["MODIFY", "CREATE", "MERGE"]]
+        initial = self._getInitialState(allEdits)
+        self.performerEdits = [edit for edit in allEdits if edit['operation'] in ["MODIFY", "MERGE"]]
         self.performerStates[stashDateToDateTime(initial['closed'])] = self._processPerformerEdit({"aliases" : [], "tattoos" : [], "piercings" : [], "images" : [], "urls" : []}, initial)
 
         prevState = self.performerStates[stashDateToDateTime(initial['closed'])]
@@ -812,8 +813,8 @@ class StashBoxPerformerHistory:
 
         return prevState
     
-    def _getInitialState(self, edits : [t.PerformerEdit]):
-        easyMode = [edit for edit in edits if edit['operation'] == "CREATE"]
+    def _getInitialState(self, allEdits : [t.PerformerEdit]):
+        easyMode = [edit for edit in allEdits if edit['operation'] == "CREATE"]
         if len(easyMode) > 0:
             return easyMode[0]
         
@@ -821,9 +822,9 @@ class StashBoxPerformerHistory:
         firstState = deepcopy(self.performer)
         firstState.pop('merged_ids')
 
-        edits.reverse()
+        allEdits.reverse()
 
-        for edit in edits:
+        for edit in allEdits:
             # Reverse the Edit actions
             for attr in ["created","closed","name","disambiguation","gender","birthdate","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
                 if edit['details'].get(attr):
@@ -846,7 +847,7 @@ class StashBoxPerformerHistory:
         for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images", "added_urls"]:
             firstState[attr] = firstState[attr.split('_')[1]]
 
-        edits.reverse()
+        allEdits.reverse()
 
         return {
             "details": firstState,

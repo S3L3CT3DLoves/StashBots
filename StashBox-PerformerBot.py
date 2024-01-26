@@ -112,13 +112,19 @@ def manualUpdatePerformer(stash : StashInterface, source : StashSource, destinat
 
     # Keep existing links to avoid removing data (need to map to string to dedup)
     existingUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
+
+    # Add url to source if there is none yet
+    existingUrls.append({
+                "url" : f"{siteMapper.SOURCE_INFOS[source]['url']}performers/{sourcePerf.performer['id']}",
+                "site_id" : siteMapper.SOURCE_INFOS[destination]['siteIds'][source]
+            })
+    
     concatUrls = [json.dumps(data, sort_keys=True) for data in existingUrls + draft["urls"]]
     concatUrls = list(set(concatUrls))
     concatUrls = [json.loads(data) for data in concatUrls]
 
-    # TODO add url to source if there is none yet
-
     draft["urls"] = concatUrls
+    
 
     print("Loading existing images")
     existingImgs = list(map(lambda x: getImgB64(x['url']),performer.get("images", [])))
