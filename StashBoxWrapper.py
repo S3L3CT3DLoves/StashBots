@@ -967,8 +967,26 @@ class StashBoxPerformerHistory:
 
         prevState = self.performerStates[stashDateToDateTime(initial['closed'])]
         for state in self.performerEdits:
-            prevState = StashBoxPerformerHistory.applyPerformerUpdate(prevState,state)
-            self.performerStates[stashDateToDateTime(state['closed'])] = prevState
+            if self._checkStateChange(state):
+                prevState = StashBoxPerformerHistory.applyPerformerUpdate(prevState,state)
+                self.performerStates[stashDateToDateTime(state['closed'])] = prevState
+
+    def _checkStateChange(self, changes : t.PerformerEdit) -> bool:
+        # Checks if there are **applicable** changes in the Edit
+        for attr in ["name","disambiguation","gender","birthdate", "birth_date","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
+            if changes['details'].get(attr) and changes['details'].get(attr) != "":
+                return True
+
+        for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images", "added_urls"]:
+            if changes['details'].get(attr) and changes['details'].get(attr) != "":
+                return True
+
+        for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_urls"]:
+            if changes['details'].get(attr) and changes['details'].get(attr) != "":
+                return True
+        
+        # Should only return False if an Edit only contains a remove_image, because we don't replicate this change for now
+        return False
 
     def _getInitialState(self, allEdits : [t.PerformerEdit]):
         easyMode = [edit for edit in allEdits if edit['operation'] == "CREATE"]
@@ -991,7 +1009,8 @@ class StashBoxPerformerHistory:
             for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images", "added_urls"]:
                 if edit['details'].get(attr):
                     for x in edit['details'].get(attr):
-                        firstState[attr.split('_')[1]].remove(x)
+                        if x in firstState[attr.split('_')[1]] :
+                            firstState[attr.split('_')[1]].remove(x)
 
             for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:
                 if edit['details'].get(attr):

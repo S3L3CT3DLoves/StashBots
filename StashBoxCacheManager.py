@@ -64,9 +64,9 @@ class StashBoxCache:
         deletedIdx = self._getPerformerIdxById(performerId)
         del self.performers[deletedIdx]
 
-    def updatePerformer(self, performerId : str, editDetails : t.PerformerEdit):
+    def updatePerformer(self, performerId : str, edit : t.PerformerEdit):
         performerIdx = self._getPerformerIdxById(performerId)
-        self.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.performers[performerIdx], editDetails)
+        self.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.performers[performerIdx], edit)
 
     def saveCacheToFile(self):
         dateNow = datetime.now().strftime(STRFTIMEFORMAT)
@@ -120,11 +120,11 @@ class StashBoxCacheManager:
             elif edit["operation"] == "DESTROY":
                 self.cache.deletePerformerById(targetPerformerId)
             elif edit["operation"] == "MODIFY":
-                self.cache.updatePerformer(targetPerformerId, edit["details"])
+                self.cache.updatePerformer(targetPerformerId, edit)
             elif edit["operation"] == "MERGE":
                 mergedIds = list(map( lambda source: source["id"] ,edit["merge_sources"]))
                 print(f"Merging {mergedIds}")
-                self.cache.updatePerformer(targetPerformerId, edit["details"])
+                self.cache.updatePerformer(targetPerformerId, edit)
                 for id in mergedIds:
                     self.cache.deletePerformerById(id)
         
