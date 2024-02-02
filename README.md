@@ -56,3 +56,19 @@ For all lines in the file where the last element is True, it will force the upda
 This must only be used after a manual review of the list of performers has been done, to ensure no import data will be overwritten.
 
 Because this operation can be destructive, it will not be send in BOT mode, and will show up a normal Edit in StashBox.
+
+# StashBox Cache
+The bot features a full caching feature, to keep a local copy of all performers in a StashBox instance.
+
+This is built to avoid overloading StashBox servers each time the bot runs.
+
+The cache update can take a while, this is *by design*, downloading a full cache can take between 400 and 6000+ API calls. To avoid overloading the StashBox server, each API call is delayed by 5 seconds.
+
+To speed things up, update your cache regularly (at least once a week), to benefit from the **refresh** feature. Which does not re-download all performers on the StahsBox server. It will grab all **Changes** (Edits) applied to performers since the last refresh, and apply them to the existing cache. This requires fewer API calls, making it a lot faster.
+
+## Updating the cache
+Updates are executed when you run **Update Mode**
+
+If the cache has not been refreshed in the past 24h, it will update itself. If this value is too high, it can be changed in the code.
+
+If the cache is less than 7 days old, the bot will not re-download all performers on the StahsBox server. It will grab all **Changes** (Edits) applied to performers since the last refresh, and apply them to the existing cache.
