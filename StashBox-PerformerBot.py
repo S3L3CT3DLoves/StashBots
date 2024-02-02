@@ -1,10 +1,11 @@
 import csv
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from enum import Enum
 import glob
 import json, os, re, sys, argparse
+from StashBoxCacheManager import StashBoxCacheManager
 import schema_types as t
-from StashBoxWrapper import PerformerUploadConfig, StashBoxFilterManager, StashBoxPerformerHistory, StashSource, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllPerformers, stashDateToDateTime, getImgB64
+from StashBoxWrapper import PerformerUploadConfig, StashBoxFilterManager, StashBoxPerformerHistory, StashSource, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, stashDateToDateTime, getImgB64
 from stashapi.stashapp import StashInterface
 
 
@@ -47,7 +48,7 @@ def createPerformers(stash : StashInterface, source : StashSource, destination :
         
         submitted = perfManager.submitPerformerCreate(createInput, comment)
 
-        print(f"Performer Edit submitted : {siteMapper.SOURCE_INFOS[destination]['url']}/edits/{submitted['id']}")
+        print(f"Performer Edit submitted : {siteMapper.SOURCE_INFOS[destination]['url']}edits/{submitted['id']}")
 
 def updatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer, comment : str, outputFileStream = None) -> ReturnCode:
     sourceUrl = [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[source]['url'])][0]['url']
@@ -135,8 +136,6 @@ def manualUpdatePerformer(stash : StashInterface, source : StashSource, destinat
 
     print(f"{performer['name']} updated")
 
-
-
 def getPerformerUploadsFromStash(stash : StashInterface, source : StashSource, destination : StashSource) -> [PerformerUploadConfig]:
     sourceEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[source]['url']}graphql"
     destinationEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[destination]['url']}graphql"
@@ -167,17 +166,6 @@ def getPerformerUploadsFromStash(stash : StashInterface, source : StashSource, d
         , TO_UPLOAD
     ))
     return TO_UPLOAD
-
-
-def savePerformerData(file,data):
-    first = True
-    for performer in data:
-        com = ','
-        if(first and file.tell() < 100):
-            com=''
-            first = False
-
-        print(f"{com} {json.dumps(performer)}", file=file)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -220,31 +208,24 @@ if __name__ == '__main__':
     SOURCE = StashSource[args.source_stashbox]
     TARGET = StashSource[args.target_stashbox]
 
+    sourceCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url']), SOURCE, False)
+    targetCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']), TARGET, True)
+
     count = 0
 
     if args.m.lower() == "update":
         print("Update mode")
         # Update mode
         performersList = []
-        date = datetime.now().strftime("%Y-%m-%d")
-        filename = f"{args.target_stashbox}_performers_cache_{date}.json"
-        print(filename)
-        if not os.path.exists(filename):
-            print("Downloading the local cache, this could take some time")
-            with open(filename, mode='w') as file:
-                file.write('{ "performers" : [')
-                getAllPerformers(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']), lambda x: savePerformerData(file, x))
-                file.write("]}")
 
-        
-        with open(filename, mode='r') as cache:
-            print("Using local cache")
-            performersList = json.load(cache)['performers']
-            performersList = list(filter(
-                lambda performer: [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url'])] != []
-                ,performersList
-            ))
-            print(len(performersList))
+        targetCacheMgr.loadCache(True, 24, 7)
+        print("Using local cache")
+
+        performersList = list(filter(
+            lambda performer: [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url'])] != [],
+            targetCacheMgr.cache.getCache()
+        ))
+        print(len(performersList))
         
         #Now actually do the update
         plist = list(reversed(performersList))
@@ -257,7 +238,7 @@ if __name__ == '__main__':
                 if status == ReturnCode.HAS_DRAFT:
                     print(f"{performer['name']} not updated - DRAFT exists")
                 elif status == ReturnCode.NO_NEED:
-                    print(f"{performer['name']} not updated - no updated required")
+                    print(f"{performer['name']} not updated - no update required")
                 elif status == ReturnCode.DIFF:
                     print(f"{performer['name']} not updated - manual change was made")
                 elif status == ReturnCode.ERROR:
