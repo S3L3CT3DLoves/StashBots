@@ -333,6 +333,7 @@ def getAllEdits(sourceEndpoint : {}, limit = 7, callback = None):
             url
           }
           waist_size
+          updated
         }
       }
         merge_sources {
