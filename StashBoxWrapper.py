@@ -1153,6 +1153,8 @@ class StashBoxPerformerHistory:
         for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images", "added_urls"]:
             if editChanges['details'].get(attr):
                 for x in editChanges['details'].get(attr):
+                    if newState[attr.split('_')[1]] == None:
+                        newState[attr.split('_')[1]] = []
                     newState[attr.split('_')[1]].append(x)
 
         for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:

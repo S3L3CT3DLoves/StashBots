@@ -51,10 +51,11 @@ class StashBoxCache:
     
     def _getPerformerIdxById(self, performerId) -> t.Performer:
         result = None
-        try:
-            result = [idx for idx, perf in enumerate(self.performers) if perf.id == performerId][0]
-        except:
-            pass
+        for idx, perf in enumerate(self.performers):
+            if perf['id'] == performerId:
+                return idx
+        
+        #result = [idx for idx, perf in enumerate(self.performers) if perf.id == performerId][0]
         return result
     
     def addPerformer(self, performer : t.Performer):
