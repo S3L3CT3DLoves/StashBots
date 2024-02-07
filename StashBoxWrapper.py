@@ -9,6 +9,7 @@ import schema_types as t
 import requests
 from urllib3 import encode_multipart_formdata
 import pycountry
+import StashBoxWrapperGQLQueries as GQLQ
 
 StashSource = Enum('StashSource', 'STASHDB PMVSTASH FANSDB')
 
@@ -54,8 +55,19 @@ def handleGQLResponse(response):
 def getImgB64(url):
     return base64.b64encode(requests.get(url).content)
 
+def resolveGQLFragments(gql):
+    requiredFragments = ""
+    for fragment in GQLQ.FRAGMENTS.keys():
+        if fragment in gql:
+            requiredFragments = requiredFragments + "\n" + GQLQ.FRAGMENTS[fragment]
+            continue
+    
+    return requiredFragments
+
+
 def callGraphQL(stashBoxEndpoint, query, variables={}):
-    json_request = {'query': query}
+    resolvedQuery = query + "\n" + resolveGQLFragments(query)
+    json_request = {'query': resolvedQuery}
     
     if variables:
         serialize_dict(variables)
@@ -121,59 +133,6 @@ def stashDateToDateTime(stashDate : str) -> datetime:
     return ret
 
 def getAllPerformers(sourceEndpoint : {}, callback = None):
-    gql = """
-    query QueryPerformers($input: PerformerQueryInput!) {
-        queryPerformers(input: $input) {
-            count
-            performers {
-            band_size
-            aliases
-            birth_date
-            birthdate {
-                date
-            }
-            breast_type
-            career_end_year
-            career_start_year
-            country
-            created
-            cup_size
-            deleted
-            disambiguation
-            ethnicity
-            eye_color
-            gender
-            hair_color
-            height
-            hip_size
-            id
-            images {
-                id
-                url
-            }
-            merged_ids
-            name
-            piercings {
-                description
-                location
-            }
-            tattoos {
-                description
-                location
-            }
-            updated
-            urls {
-                url
-                site {
-                id
-                }
-            }
-            waist_size
-            }
-        }
-    }
-    """
-
     returnData = []
     pages = -1
     query = {
@@ -181,7 +140,7 @@ def getAllPerformers(sourceEndpoint : {}, callback = None):
         "per_page" : 100
     }
 
-    response = callGraphQL(sourceEndpoint, gql, {"input" : query})["queryPerformers"]
+    response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
     returnData = response["performers"]
     pages = math.ceil(response["count"] / query["per_page"])
     while query["page"] < pages:
@@ -190,7 +149,7 @@ def getAllPerformers(sourceEndpoint : {}, callback = None):
 
         # Avoid overloading the server
         time.sleep(5)
-        response = callGraphQL(sourceEndpoint, gql, {"input" : query})["queryPerformers"]
+        response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
         returnData.extend(response["performers"])
         if callback != None:
             callback(response["performers"])
@@ -388,7 +347,10 @@ class StashBoxSitesMapper:
         },
         StashSource.STASHDB: {
             "url" : "https://stashdb.org/",
-            "siteIds" : {}
+            "siteIds" : {
+                StashSource.FANSDB : "c2bc5c80-1141-4ae2-8716-075fbd37c296",
+                StashSource.PMVSTASH : "d96b877b-abb7-47a1-add3-69e5087ef06d"
+            }
         },
         StashSource.FANSDB : {
             "url" : "https://fansdb.xyz/",
@@ -778,199 +740,46 @@ class StashBoxPerformerHistory:
 
     def __init__(self, stashBoxEndpoint : {}, performerId : str) -> None:
         self.endpoint = stashBoxEndpoint
+        self.performerEdits = []
+        self.performerStates = {}
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
-        gql = """
-        query Query($input: ID!) {
-            findPerformer(id: $input) {
-                id
-                name
-                edits {
-                applied
-                closed
-                details {
-                    ... on PerformerEdit {
-                    name
-                    disambiguation
-                    added_aliases
-                    removed_aliases
-                    gender
-                    added_urls {
-                        url
-                        site {
-                        id
-                        }
-                    }
-                    removed_urls {
-                        url
-                        site {
-                        id
-                        }
-                    }
-                    birthdate
-                    ethnicity
-                    country
-                    eye_color
-                    hair_color
-                    height
-                    cup_size
-                    band_size
-                    waist_size
-                    hip_size
-                    breast_type
-                    career_start_year
-                    career_end_year
-                    added_tattoos {
-                        description
-                        location
-                    }
-                    removed_tattoos {
-                        description
-                        location
-                    }
-                    added_piercings {
-                        description
-                        location
-                    }
-                    removed_piercings {
-                        description
-                        location
-                    }
-                    added_images {
-                        url
-                        id
-                    }
-                    removed_images {
-                        id
-                        url
-                    }
-                    draft_id
-                    aliases
-                    urls {
-                        url
-                        site {
-                        id
-                        }
-                    }
-                    images {
-                        id
-                        url
-                    }
-                    tattoos {
-                        description
-                        location
-                    }
-                    piercings {
-                        description
-                        location
-                    }
-                    }
-                }
-                operation
-                old_details {
-                    ... on PerformerEdit {
-                    aliases
-                    band_size
-                    birthdate
-                    breast_type
-                    career_end_year
-                    career_start_year
-                    country
-                    cup_size
-                    disambiguation
-                    ethnicity
-                    eye_color
-                    gender
-                    hair_color
-                    height
-                    hip_size
-                    images {
-                        id
-                        url
-                    }
-                    name
-                    piercings {
-                        description
-                        location
-                    }
-                    tattoos {
-                        description
-                        location
-                    }
-                    urls {
-                        url
-                        site {
-                        id
-                        }
-                    }
-                    waist_size
-                    }
-                }
-                }
-                age
-                aliases
-                band_size
-                birth_date
-                breast_type
-                career_end_year
-                career_start_year
-                country
-                created
-                cup_size
-                deleted
-                disambiguation
-                ethnicity
-                eye_color
-                gender
-                hair_color
-                height
-                hip_size
-                images {
-                id
-                url
-                }
-                merged_ids
-                piercings {
-                description
-                location
-                }
-                tattoos {
-                description
-                location
-                }
-                updated
-                urls {
-                url
-                site {
-                    id
-                }
-                }
-                waist_size
-            }
-        }
-        """
-        
-        perfData : t.Performer = callGraphQL(self.endpoint,gql, {'input' : performerId})['findPerformer']
+        perfData : t.Performer = callGraphQL(self.endpoint,GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
         self.performer = perfData
+        
+        editsResponse = callGraphQL(self.endpoint, GQLQ.GET_PERFORMER_EDITS, {'input': {
+            "applied": True,
+            "target_id": performerId,
+            "target_type": "PERFORMER"
+        }})["queryEdits"]
 
-        self.performerEdits : [t.PerformerEdit] = list(filter(
-            lambda edit: edit['applied'] == True
-            ,self.performer.pop("edits")
-            ))
-        self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
-        self.performerStates = {}
+        if int(editsResponse["count"]) == 0:
+            # There are no Edits, an issue when the DB was imported initially // Create a fake Edit for the initial submit
+            self.performerStates[stashDateToDateTime(self.performer["created"])] = {
+                "details" : self.performer,
+                "closed" : self.performer["created"]
+            }
+        else:
+            createEdit = [edit for edit in editsResponse["edits"] if edit['operation'] == "CREATE"]
+            self.performerEdits = [edit for edit in editsResponse["edits"] if edit['operation'] in ["MODIFY", "MERGE"]]
+            self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
+            if len(createEdit) > 0 and createEdit[0]["details"] != None:
+                initial = createEdit[0]
+            else:
+                # There is no CREATE edit, a known StashDB issue... Need to reverse the entire Edit chain
+                initial = self._getInitialState(self.performerEdits)
+            
+            self.performerStates[stashDateToDateTime(initial['closed'])] = StashBoxPerformerHistory.applyPerformerUpdate({"aliases" : [], "tattoos" : [], "piercings" : [], "images" : [], "urls" : []}, initial)
 
-        allEdits = [edit for edit in self.performerEdits if edit['operation'] in ["MODIFY", "CREATE", "MERGE"]]
-        initial = self._getInitialState(allEdits)
-        self.performerEdits = [edit for edit in allEdits if edit['operation'] in ["MODIFY", "MERGE"]]
-        self.performerStates[stashDateToDateTime(initial['closed'])] = StashBoxPerformerHistory.applyPerformerUpdate({"aliases" : [], "tattoos" : [], "piercings" : [], "images" : [], "urls" : []}, initial)
-
-        prevState = self.performerStates[stashDateToDateTime(initial['closed'])]
-        for state in self.performerEdits:
-            if self._checkStateChange(state):
-                prevState = StashBoxPerformerHistory.applyPerformerUpdate(prevState,state)
-                self.performerStates[stashDateToDateTime(state['closed'])] = prevState
+            prevState = self.performerStates[stashDateToDateTime(initial['closed'])] 
+            self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
+            for state in self.performerEdits:
+                if self._checkStateChange(state):
+                    prevState = StashBoxPerformerHistory.applyPerformerUpdate(prevState,state)
+                    self.performerStates[stashDateToDateTime(state['closed'])] = prevState
+        
+        return
 
     def _checkStateChange(self, changes : t.PerformerEdit) -> bool:
         # Checks if there are **applicable** changes in the Edit
@@ -990,14 +799,8 @@ class StashBoxPerformerHistory:
         return False
 
     def _getInitialState(self, allEdits : [t.PerformerEdit]):
-        easyMode = [edit for edit in allEdits if edit['operation'] == "CREATE"]
-        if len(easyMode) > 0:
-            return easyMode[0]
-        
-        # There is no CREATE edit, a known StashDB issue... Need to reverse the entire Edit chain
         firstState = deepcopy(self.performer)
         firstState.pop('merged_ids')
-
         allEdits.reverse()
 
         for edit in allEdits:

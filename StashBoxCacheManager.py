@@ -31,6 +31,10 @@ class StashBoxCache:
                 earliest = fileDate
         
         self.cacheDate = earliest
+        if earliest == datetime(2020,1,1,1,1,1):
+            # There is no cache file yet
+            return
+        
         dateCacheFile = earliest.strftime(STRFTIMEFORMAT)
         filename = f"{self.stashBoxInstance.name}_performers_cache_{dateCacheFile}.json"
         with open(filename, mode='r') as cache:
@@ -95,7 +99,7 @@ class StashBoxCacheManager:
         dateRefreshLimit = datetime.now() - timedelta(days=refreshLimitDays)
 
         if self.cache.cacheDate >= dateLimit:
-            # Cache is ready up to date
+            # Cache is already up to date
             return
         
         if self.cache.cacheDate < dateRefreshLimit:

@@ -3,6 +3,8 @@ from datetime import datetime, date, timedelta
 from enum import Enum
 import glob
 import json, os, re, sys, argparse
+
+from requests import get
 from StashBoxCacheManager import StashBoxCacheManager
 import schema_types as t
 from StashBoxWrapper import PerformerUploadConfig, StashBoxFilterManager, StashBoxPerformerHistory, StashSource, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, stashDateToDateTime, getImgB64
@@ -177,7 +179,7 @@ if __name__ == '__main__':
         """,
         epilog="__StashBox_Perf_Mgr_v0.4__"
     )
-    parser.add_argument("-m", help="Options: c - CREATE / u - UPDATE", choices=['create', 'update','manual', 'test'], required=True)
+    parser.add_argument("-m", help="Options: c - CREATE / u - UPDATE", choices=['create', 'update','manual', 'updatecache', 'test'], required=True)
     parser.add_argument("-s", "--stash", help="Local Stash url to be used to get the Stashbox config", default="http://localhost:9999/")
     parser.add_argument("-tsb", "--target-stashbox", help="Target StashBox instance", choices=['STASHDB', 'PMVSTASH', "FANSDB"], required=True)
     parser.add_argument("-ssb", "--source-stashbox", help="Source StashBox instance", choices=['STASHDB', 'PMVSTASH', "FANSDB"], required=True)
@@ -277,15 +279,11 @@ if __name__ == '__main__':
         args.input_file.close()
     
     elif args.m.lower() == "test":
-        oldest = datetime(1970,1,1)
-        for file in glob.glob(f"{args.target_stashbox}_performers_cache_*"):
-            filedate = file.split("_")[-1].strip('.json')
-            filedate = datetime.strptime(filedate, "%Y-%m-%d")
-            if filedate > oldest:
-                oldest = filedate
-            
-        if oldest != datetime(1970,1,1) and (datetime.now() - oldest).days < 15:
-            # If an old cache exists, and it is not too old (over 15 days), update it
-            print("Old cache file exists, updating it")
-            with open(f"{args.target_stashbox}_performers_cache_{oldest.strftime('%Y-%m-%d')}.json") as oldCacheFile:
-                print("Opened old cache")
+        ip = get('https://api.ipify.org').content.decode('utf8')
+        print('My public IP address is: {}'.format(ip))
+
+    elif args.m.lower() == "updatecache":
+        print("Cache Update mode - Updating Target cache")
+        targetCacheMgr.loadCache(True, 24, 7)
+        print("Cache Update mode - Updating Source cache")
+        sourceCacheMgr.loadCache(True, 24, 7)
