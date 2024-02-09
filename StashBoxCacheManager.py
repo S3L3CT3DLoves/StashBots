@@ -39,6 +39,8 @@ class StashBoxCache:
         filename = f"{self.stashBoxInstance.name}_performers_cache_{dateCacheFile}.json"
         with open(filename, mode='r') as cache:
             self.performers = json.load(cache)
+        
+        print(f"Cache contains {len(self.performers)} entries")
 
     def loadCacheFromStashBox(self) -> [t.Performer]:
         self.performers = getAllPerformers(self.stashBoxConnectionParams)
@@ -62,8 +64,10 @@ class StashBoxCache:
         #result = [idx for idx, perf in enumerate(self.performers) if perf.id == performerId][0]
         return result
     
-    def addPerformer(self, performer : t.Performer):
-        self.performers.append(performer)
+    def addPerformer(self, edit : t.PerformerEdit):
+        perf = StashBoxPerformerHistory.applyPerformerUpdate({}, edit)
+        perf["id"] = edit["target"]["id"]
+        self.performers.append(perf)
 
     def deletePerformerById(self, performerId : str):
         deletedIdx = self._getPerformerIdxById(performerId)
@@ -71,6 +75,9 @@ class StashBoxCache:
 
     def updatePerformer(self, performerId : str, edit : t.PerformerEdit):
         performerIdx = self._getPerformerIdxById(performerId)
+        if performerIdx == None:
+            # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
+            return
         self.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.performers[performerIdx], edit)
 
     def saveCacheToFile(self):
@@ -100,6 +107,7 @@ class StashBoxCacheManager:
 
         if self.cache.cacheDate >= dateLimit:
             # Cache is already up to date
+            print("Cache is up to date")
             return
         
         if self.cache.cacheDate < dateRefreshLimit:
@@ -114,6 +122,7 @@ class StashBoxCacheManager:
         print("Existing cache file is outdated, updating it with latest changes")
         allEdits = getAllEdits(self.cache.stashBoxConnectionParams, refreshLimitDays)
         allEditsFiltered = list(filter(lambda edit: stashDateToDateTime(edit["closed"]) >= self.cache.cacheDate, allEdits))
+        allEditsFiltered.reverse()
         print(f"{len(allEditsFiltered)} changes to process")
 
         for edit in allEditsFiltered:
@@ -121,7 +130,7 @@ class StashBoxCacheManager:
             print(f"{edit['operation']} on {targetPerformerId}")
 
             if edit["operation"] == "CREATE":
-                self.cache.addPerformer(edit["target"])
+                self.cache.addPerformer(edit)
             elif edit["operation"] == "DESTROY":
                 self.cache.deletePerformerById(targetPerformerId)
             elif edit["operation"] == "MODIFY":

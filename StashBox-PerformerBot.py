@@ -283,7 +283,8 @@ if __name__ == '__main__':
         print('My public IP address is: {}'.format(ip))
 
     elif args.m.lower() == "updatecache":
-        print("Cache Update mode - Updating Target cache")
+        print("Cache Update mode")
+        print("== Updating Target cache ==")
         targetCacheMgr.loadCache(True, 24, 7)
-        print("Cache Update mode - Updating Source cache")
+        print("== Updating Source cache ==")
         sourceCacheMgr.loadCache(True, 24, 7)

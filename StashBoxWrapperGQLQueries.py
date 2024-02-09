@@ -49,6 +49,32 @@ query QueryPerformers($input: PerformerQueryInput!) {
 }
 """
 
+GET_ALL_PERFORMER_EDITS = """
+    query QueryEdits($input: EditQueryInput!) {
+  queryEdits(input: $input) {
+    edits {
+      applied
+      closed
+      details {
+        ... PerformerEditFragment
+      }
+      id
+      status
+      operation
+      target {
+        ... PerformerFragment
+      }
+        merge_sources {
+        ... on Performer {
+          id
+        }
+      }
+    }
+    count
+  }
+}
+"""
+
 
 FRAG_PERF = """
 fragment PerformerFragment on Performer {

@@ -158,153 +158,6 @@ def getAllPerformers(sourceEndpoint : {}, callback = None):
 
 def getAllEdits(sourceEndpoint : {}, limit = 7, callback = None):
     dateLimit = datetime.now() - timedelta(days=limit)
-    gql = """
-    query QueryEdits($input: EditQueryInput!) {
-  queryEdits(input: $input) {
-    edits {
-      applied
-      closed
-      details {
-        ... on PerformerEdit {
-          name
-          disambiguation
-          added_aliases
-          removed_aliases
-          gender
-          added_urls {
-            site {
-              id
-            }
-            url
-          }
-          removed_urls {
-            site {
-              id
-            }
-            url
-          }
-          birthdate
-          ethnicity
-          country
-          eye_color
-          hair_color
-          height
-          cup_size
-          band_size
-          waist_size
-          hip_size
-          breast_type
-          career_start_year
-          career_end_year
-          added_tattoos {
-            location
-            description
-          }
-          removed_tattoos {
-            location
-            description
-          }
-          added_piercings {
-            location
-            description
-          }
-          removed_piercings {
-            location
-            description
-          }
-          added_images {
-            id
-            url
-            width
-            height
-          }
-          removed_images {
-            id
-            url
-            width
-            height
-          }
-          draft_id
-          aliases
-          urls {
-            site {
-              id
-            }
-            url
-          }
-          images {
-            id
-            url
-            width
-            height
-          }
-          tattoos {
-            location
-            description
-          }
-          piercings {
-            location
-            description
-          }
-        }
-      }
-      id
-      status
-      operation
-      target {
-        ... on Performer {
-          id
-          age
-          aliases
-          band_size
-          birth_date
-          breast_type
-          career_end_year
-          career_start_year
-          country
-          cup_size
-          disambiguation
-          ethnicity
-          eye_color
-          gender
-          hair_color
-          height
-          hip_size
-          images {
-            height
-            id
-            url
-            width
-          }
-          name
-          piercings {
-            description
-            location
-          }
-          tattoos {
-            description
-            location
-          }
-          urls {
-            site {
-              id
-            }
-            url
-          }
-          waist_size
-          updated
-        }
-      }
-        merge_sources {
-        ... on Performer {
-          id
-        }
-      }
-    }
-    count
-  }
-}
-    """
 
     returnData = []
     pages = -1
@@ -315,7 +168,7 @@ def getAllEdits(sourceEndpoint : {}, limit = 7, callback = None):
         "per_page" : 100
     }
 
-    response = callGraphQL(sourceEndpoint, gql, {"input" : query})["queryEdits"]
+    response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
     returnData = response["edits"]
     pages = math.ceil(response["count"] / query["per_page"])
     while query["page"] < pages:
@@ -324,7 +177,7 @@ def getAllEdits(sourceEndpoint : {}, limit = 7, callback = None):
 
         # Avoid overloading the server
         time.sleep(5)
-        response = callGraphQL(sourceEndpoint, gql, {"input" : query})["queryEdits"]
+        response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
         returnData.extend(response["edits"])
         if callback != None:
             callback(response["edits"])
@@ -949,20 +802,26 @@ class StashBoxPerformerHistory:
     def applyPerformerUpdate(currentPerformer : t.Performer, editChanges : t.PerformerEdit) -> t.Performer:
         newState = deepcopy(currentPerformer)
 
-        for attr in ["name","disambiguation","gender","birthdate", "birth_date","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
+        for attr in ["name","disambiguation","gender","birthdate", "birth_date","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year", "created", "updated", "deleted"]:
             if editChanges['details'].get(attr):
                 newState[attr] = editChanges['details'][attr]
 
         for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images", "added_urls"]:
             if editChanges['details'].get(attr):
                 for x in editChanges['details'].get(attr):
-                    if newState[attr.split('_')[1]] == None:
-                        newState[attr.split('_')[1]] = []
-                    newState[attr.split('_')[1]].append(x)
+                    key = attr.split('_')[1]
+                    if key not in newState or newState[key] == None:
+                        newState[key] = []
+                    newState[key].append(x)
 
-        for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:
+        for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_urls"]:
             if editChanges['details'].get(attr):
                 for x in editChanges['details'].get(attr):
                     newState[attr.split('_')[1]].remove(x)
+        
+        if editChanges['details'].get("removed_images"):
+            for x in editChanges['details'].get("removed_images"):
+                    existingImg = [img for img in newState["images"] if img["id"] == x["id"]][0]
+                    newState["images"].remove(existingImg)
         
         return newState
