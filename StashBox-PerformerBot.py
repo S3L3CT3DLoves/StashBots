@@ -52,8 +52,9 @@ def createPerformers(stash : StashInterface, source : StashSource, destination :
 def updatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer, comment : str, outputFileStream = None, cache : StashBoxCache = None) -> ReturnCode:
     sourceUrl = [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[source]['url'])][0]['url']
     sourceId = sourceUrl.split('/').pop()
-    lastUpdate = stashDateToDateTime(performer["updated"])
-    sourcePerformerHistory = StashBoxPerformerHistory(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url']), sourceId)
+    latestUpdateSource = stashDateToDateTime(performer["updated"])
+
+    sourcePerformerHistory = StashBoxPerformerHistory(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url']), sourceId, cache)
     perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache)
     perfManager.setPerformer(sourcePerformerHistory.performer)
 
@@ -64,9 +65,9 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
     if performer.get("country"):
         performer["country"] = convertCountry(performer.get("country"))
 
-    hasUpdate = sourcePerformerHistory.hasUpdate(lastUpdate)
-    incomplete = sourcePerformerHistory.isIncomplete(lastUpdate, performer)
-    compare = sourcePerformerHistory.compareAtDateTime(lastUpdate, performer)
+    hasUpdate = sourcePerformerHistory.hasUpdate(latestUpdateSource)
+    incomplete = sourcePerformerHistory.isIncomplete(latestUpdateSource, performer)
+    compare = sourcePerformerHistory.compareAtDateTime(latestUpdateSource, performer)
     if (hasUpdate or incomplete) and compare:
         print(f"Ready to update {performer['name']}")
 

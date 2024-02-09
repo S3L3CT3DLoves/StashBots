@@ -48,18 +48,21 @@ def handleGQLResponse(response):
 def getImgB64(url):
     return base64.b64encode(requests.get(url).content)
 
-def resolveGQLFragments(gql):
-    requiredFragments = ""
-    for fragment in GQLQ.FRAGMENTS.keys():
+def resolveGQLFragments(gql, fragments):
+    requiredFragments = []
+    for fragment in fragments.keys():
         if fragment in gql:
-            requiredFragments = requiredFragments + "\n" + GQLQ.FRAGMENTS[fragment]
-            continue
-    
-    return requiredFragments
+            requiredFragments.append(GQLQ.FRAGMENTS[fragment])
+
+            # If the fragment uses fragments
+            filteredFragments = deepcopy(fragments)
+            filteredFragments.pop(fragment)
+            requiredFragments = requiredFragments + resolveGQLFragments(GQLQ.FRAGMENTS[fragment], filteredFragments)
+    return list(set(requiredFragments))
 
 
 def callGraphQL(stashBoxEndpoint, query, variables={}):
-    resolvedQuery = query + "\n" + resolveGQLFragments(query)
+    resolvedQuery = query + "\n" + "\n".join(resolveGQLFragments(query, GQLQ.FRAGMENTS))
     json_request = {'query': resolvedQuery}
     
     if variables:
@@ -350,12 +353,6 @@ class StashBoxPerformerManager:
     def setPerformer(self, performer : t.Performer):
         self.performer = performer
 
-    def setSource(self, source : StashSource):
-        self.source = source
-
-    def setDestination(self, source : StashSource):
-        self.destination
-
     def getPerformer(self, performerId : str) -> t.Performer:
         """
         Retrieves the performer, returns it and stores it in the Manager
@@ -366,53 +363,11 @@ class StashBoxPerformerManager:
         ### Returns
             The performer as a t.Performer
         """
-        gql = """
-        query FindPerformer($input: ID!) {
-            findPerformer(id: $input) {
-                id
-                name
-                disambiguation
-                aliases
-                gender
-                urls {
-                    url
-                    site {
-                        id
-                    }
-                }
-                birth_date
-                age
-                ethnicity
-                country
-                eye_color
-                hair_color
-                height
-                cup_size
-                band_size
-                waist_size
-                hip_size
-                breast_type
-                career_start_year
-                career_end_year
-                tattoos {
-                    description
-                    location
-                }
-                piercings {
-                    description
-                    location
-                }
-                images {
-                    id
-                    url
-                }
-                deleted
-                merged_ids
-                updated
-            }
-        }
-        """
-        self.performer = callGraphQL(self.sourceEndpoint, gql, {'input' : performerId})['findPerformer']
+        if self.cache != None:
+            self.performer = self.cache.getPerformerById(performerId)
+        else:
+            self.performer = callGraphQL(self.sourceEndpoint, GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
+
         return self.performer
     
     def asDraftInput(self, performer : t.Performer = None) -> t.PerformerDraftInput:
@@ -585,11 +540,13 @@ class StashBoxPerformerHistory:
     performer : t.Performer
     performerEdits : List[t.PerformerEdit]
     performerStates : List[t.Performer]
+    cache : StashBoxCache
 
-    def __init__(self, stashBoxEndpoint : Dict, performerId : str) -> None:
+    def __init__(self, stashBoxEndpoint : Dict, performerId : str, cache : StashBoxCache = None) -> None:
         self.endpoint = stashBoxEndpoint
         self.performerEdits = []
         self.performerStates = {}
+        self.cache = cache
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
@@ -788,12 +745,17 @@ class StashBoxPerformerHistory:
         
         return False
 
-    def hasUpdate(self, targetDate : datetime) -> bool:
-        dates = list(self.performerStates.keys())
-        dates.sort()
-        id = bisect.bisect_right(dates,targetDate)
+    def hasUpdate(self, targetDate : datetime, performer : t.Performer = None) -> bool:
+        # dates = list(self.performerStates.keys())
+        # dates.sort()
+        # id = bisect.bisect_right(dates,targetDate)
+        # return id < len(dates)
 
-        return id < len(dates)
+        if performer == None:
+            performer = self.performer
+
+        latestUpdate = stashDateToDateTime(self.performer["updated"])
+        return latestUpdate > targetDate
     
     def applyPerformerUpdate(currentPerformer : t.Performer, editChanges : t.PerformerEdit) -> t.Performer:
         newState = deepcopy(currentPerformer)
@@ -855,7 +817,7 @@ class StashBoxCacheManager:
         if self.cache.cacheDate < dateRefreshLimit:
             # Cache is too old to refresh, do a full reload
             print("Existing cache file is too old, grabbing a brand new one")
-            self.cache.loadCacheFromStashBox()
+            self.loadCacheFromStashBox()
             if self.saveToFile:
                 self.saveCache()
             return

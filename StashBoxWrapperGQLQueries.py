@@ -43,7 +43,7 @@ query QueryPerformers($input: PerformerQueryInput!) {
     queryPerformers(input: $input) {
         count
         performers {
-        ... PerformerFragment
+        ... PerformerFragmentWidthEdits
         }
     }
 }
@@ -205,9 +205,40 @@ fragment PerformerEditFragment on PerformerEdit {
 }
 """
 
+FRAG_PERF_WITH_EDITS = """
+fragment PerformerFragmentWidthEdits on Performer {
+  ... PerformerFragment
+  edits {
+    applied
+      details {
+        ... PerformerEditFragment
+      }
+      id
+      merge_sources {
+        ... PerformerFragment
+      }
+      old_details {
+        ... PerformerEditFragment
+      }
+      operation
+      options {
+        set_merge_aliases
+        set_modify_aliases
+      }
+      status
+      target {
+        ... PerformerFragment
+      }
+      updated
+      closed
+  }
+}
+"""
+
 FRAGMENTS = {
     "PerformerFragment" : FRAG_PERF,
-    "PerformerEditFragment" : FRAG_PERFEDIT
+    "PerformerEditFragment" : FRAG_PERFEDIT,
+    "PerformerFragmentWidthEdits" : FRAG_PERF_WITH_EDITS
 }
 
 
