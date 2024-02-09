@@ -2,23 +2,16 @@ import math, time, bisect, csv, re, base64
 from copy import deepcopy
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from stashapi.classes import serialize_dict
 from stashapi.stashapp import StashInterface
+from StashBoxCache import StashBoxCache
+from StashBoxHelperClasses import PerformerUploadConfig, StashSource
 import schema_types as t
 import requests
 from urllib3 import encode_multipart_formdata
 import pycountry
 import StashBoxWrapperGQLQueries as GQLQ
-
-StashSource = Enum('StashSource', 'STASHDB PMVSTASH FANSDB')
-
-PerformerUploadConfig = TypedDict('PerformerUploadConfig', {
-	'name': str,
-	'id': str,
-    'comment':str
-})
-
 
 
 def convertCountry(name):
@@ -333,8 +326,9 @@ class StashBoxPerformerManager:
     stash : StashInterface
     sourceEndpoint = {}
     destinationEndpoint = {}
+    cache : StashBoxCache
     
-    def __init__(self, stash : StashInterface, source : StashSource, destination : StashSource,   sitesMapper : StashBoxSitesMapper = None) -> None:
+    def __init__(self, stash : StashInterface, source : StashSource, destination : StashSource, sitesMapper : StashBoxSitesMapper = None, cache : StashBoxCache = None) -> None:
         """
         Initialises the Manager
 
@@ -351,6 +345,7 @@ class StashBoxPerformerManager:
         self.stash = stash
         self.sourceEndpoint = stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url'])
         self.destinationEndpoint = stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[destination]['url'])
+        self.cache = cache
 
     def setPerformer(self, performer : t.Performer):
         self.performer = performer
@@ -825,3 +820,78 @@ class StashBoxPerformerHistory:
                     newState["images"].remove(existingImg)
         
         return newState
+    
+class StashBoxCacheManager:
+    cache : StashBoxCache
+    saveToFile = True
+
+    def __init__(self, stashBoxConnection : dict, stashBoxInstance : StashSource, saveToFile = True) -> None:
+        self.cache = StashBoxCache(stashBoxConnection, stashBoxInstance)
+        self.saveToFile = saveToFile
+    
+    def loadCache(self, useFile = True, limitHours = 24, refreshLimitDays = 7):
+        if useFile:
+            self.cache.loadCacheFromFile()
+            self.updateCache(limitHours, refreshLimitDays)
+        else:
+            self.loadCacheFromStashBox()
+
+    def loadCacheFromStashBox(self):
+        self.cache.performers = getAllPerformers(self.cache.stashBoxConnectionParams)
+        self.cache.cacheDate = datetime.now()
+
+    def updateCache(self, limitHours = 24, refreshLimitDays = 7):
+        dateLimit = datetime.now() - timedelta(hours=limitHours)
+        dateRefreshLimit = datetime.now() - timedelta(days=refreshLimitDays)
+
+        if self.cache.cacheDate >= dateLimit:
+            # Cache is already up to date
+            print("Cache is up to date")
+            return
+        
+        if self.cache.cacheDate < dateRefreshLimit:
+            # Cache is too old to refresh, do a full reload
+            print("Existing cache file is too old, grabbing a brand new one")
+            self.cache.loadCacheFromStashBox()
+            if self.saveToFile:
+                self.saveCache()
+            return
+        
+        # Cache can be refreshed, load all the recent Edits and apply them
+        print("Existing cache file is outdated, updating it with latest changes")
+        allEdits = getAllEdits(self.cache.stashBoxConnectionParams, refreshLimitDays)
+        allEditsFiltered = list(filter(lambda edit: stashDateToDateTime(edit["closed"]) >= self.cache.cacheDate, allEdits))
+        allEditsFiltered.reverse()
+        print(f"{len(allEditsFiltered)} changes to process")
+
+        for edit in allEditsFiltered:
+            targetPerformerId = edit["target"]["id"]
+            print(f"{edit['operation']} on {targetPerformerId}")
+
+            if edit["operation"] == "CREATE":
+                perf = StashBoxPerformerHistory.applyPerformerUpdate({}, edit)
+                perf["id"] = edit["target"]["id"]
+                self.cache.performers.append(perf)
+            elif edit["operation"] == "DESTROY":
+                self.cache.deletePerformerById(targetPerformerId)
+            elif edit["operation"] == "MODIFY":
+                self.updatePerformer(targetPerformerId, edit)
+            elif edit["operation"] == "MERGE":
+                mergedIds = list(map( lambda source: source["id"] ,edit["merge_sources"]))
+                print(f"Merging {mergedIds}")
+                self.updatePerformer(targetPerformerId, edit)
+                for id in mergedIds:
+                    self.cache.deletePerformerById(id)
+        
+        if self.saveToFile:
+            self.saveCache()
+
+    def saveCache(self):
+        self.cache.saveCacheToFile()
+
+    def updatePerformer(self, performerId, edit : t.PerformerEdit):
+        performerIdx = self._getPerformerIdxById(performerId)
+        if performerIdx == None:
+            # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
+            return
+        self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.performers[performerIdx], edit)
