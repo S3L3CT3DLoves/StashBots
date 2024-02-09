@@ -66,5 +66,6 @@ class StashBoxCache:
     def saveCacheToFile(self):
         dateNow = datetime.now().strftime(STRFTIMEFORMAT)
         filename = f"{self.stashBoxInstance.name}_performers_cache_{dateNow}.json"
+        print(f"Saving cache to file: {filename}")
         with open(filename, mode='w') as file:
             json.dump(self.performers, file)

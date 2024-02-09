@@ -667,7 +667,8 @@ class StashBoxPerformerHistory:
             for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:
                 if edit['details'].get(attr):
                     for x in edit['details'].get(attr):
-                        firstState[attr.split('_')[1]].append(x)
+                        if x != None:
+                            firstState[attr.split('_')[1]].append(x)
         
         for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:
             firstState[attr] = []
@@ -720,7 +721,7 @@ class StashBoxPerformerHistory:
                 # TODO - Handle dates where day / month is missing (eg: 2002 vs 2002-01-01)
                 if len(compareValue) != len(localValue):
                     # One of the dates is a short date, the other is not
-                    dateChecker = "^(\d{4})-01-01"
+                    dateChecker = "^(\\d{4})-01-01"
                     if len(compareValue) == 4:
                         localCheck = re.match(dateChecker, localValue)
                         if compareValue != localCheck.group(1):
@@ -816,6 +817,8 @@ class StashBoxPerformerHistory:
         
         if editChanges['details'].get("removed_images"):
             for x in editChanges['details'].get("removed_images"):
+                    if x == None:
+                        continue
                     existingImg = [img for img in newState["images"] if img["id"] == x["id"]][0]
                     newState["images"].remove(existingImg)
         
@@ -890,8 +893,8 @@ class StashBoxCacheManager:
         self.cache.saveCacheToFile()
 
     def updatePerformer(self, performerId, edit : t.PerformerEdit):
-        performerIdx = self._getPerformerIdxById(performerId)
+        performerIdx = self.cache._getPerformerIdxById(performerId)
         if performerIdx == None:
             # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
             return
-        self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.performers[performerIdx], edit)
+        self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.cache.performers[performerIdx], edit)

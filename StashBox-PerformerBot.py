@@ -227,8 +227,11 @@ if __name__ == '__main__':
         # Update mode
         performersList = []
 
+        print("Using local cache for TARGET (always on)")
         targetCacheMgr.loadCache(True, 24, 7)
-        print("Using local cache")
+        if sourceCacheMgr != None:
+            print("Using local cache for SOURCE")
+            sourceCacheMgr.loadCache(True, 24, 7)
 
         performersList = list(filter(
             lambda performer: [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url'])] != [],
