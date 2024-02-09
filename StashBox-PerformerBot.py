@@ -1,6 +1,7 @@
 import csv
 from enum import Enum
 import json, re, sys, argparse
+from typing import List
 from requests import get
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource
@@ -18,7 +19,7 @@ class ReturnCode(Enum):
     DIFF = -2
     ERROR = -99
 
-def createPerformers(stash : StashInterface, source : StashSource, destination : StashSource, uploads : [PerformerUploadConfig], comment : str, cache : StashBoxCache = None):
+def createPerformers(stash : StashInterface, source : StashSource, destination : StashSource, uploads : List[PerformerUploadConfig], comment : str, cache : StashBoxCache = None):
     stashFilter = StashBoxFilterManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[destination]['url']))
 
     print("Checking if performers are already added in Edits")
@@ -134,7 +135,7 @@ def manualUpdatePerformer(stash : StashInterface, source : StashSource, destinat
 
     print(f"{performer['name']} updated")
 
-def getPerformerUploadsFromStash(stash : StashInterface, source : StashSource, destination : StashSource) -> [PerformerUploadConfig]:
+def getPerformerUploadsFromStash(stash : StashInterface, source : StashSource, destination : StashSource) -> List[PerformerUploadConfig]:
     sourceEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[source]['url']}graphql"
     destinationEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[destination]['url']}graphql"
 

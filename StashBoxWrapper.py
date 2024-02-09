@@ -2,7 +2,7 @@ import math, time, bisect, csv, re, base64
 from copy import deepcopy
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import NotRequired, TypedDict
+from typing import Dict, List, NotRequired, TypedDict
 from stashapi.classes import serialize_dict
 from stashapi.stashapp import StashInterface
 from StashBoxCache import StashBoxCache
@@ -125,7 +125,7 @@ def stashDateToDateTime(stashDate : str) -> datetime:
         raise
     return ret
 
-def getAllPerformers(sourceEndpoint : {}, callback = None):
+def getAllPerformers(sourceEndpoint : Dict, callback = None):
     returnData = []
     pages = -1
     query = {
@@ -149,7 +149,7 @@ def getAllPerformers(sourceEndpoint : {}, callback = None):
     
     return returnData
 
-def getAllEdits(sourceEndpoint : {}, limit = 7, callback = None):
+def getAllEdits(sourceEndpoint : Dict, limit = 7, callback = None):
     dateLimit = datetime.now() - timedelta(days=limit)
 
     returnData = []
@@ -221,12 +221,12 @@ class StashBoxSitesMapper:
                 }
 
 class StashBoxFilterManager:
-    stashBoxEndpoint : {}
+    stashBoxEndpoint : Dict
 
-    def __init__(self, endpoint : {}) -> None:
+    def __init__(self, endpoint : Dict) -> None:
         self.stashBoxEndpoint = endpoint
     
-    def filterPerformersInQueue(self, performerUploads : [PerformerUploadConfig], verbose = True):
+    def filterPerformersInQueue(self, performerUploads : List[PerformerUploadConfig], verbose = True):
         """
         Retrieves Edits posted by the current user, and checks if the current uploads are not already in there
 
@@ -276,7 +276,7 @@ class StashBoxFilterManager:
         
         return newUpload
     
-    def filterPerformersDupes(self, performerUploads : [PerformerUploadConfig], verbose = True):
+    def filterPerformersDupes(self, performerUploads : List[PerformerUploadConfig], verbose = True):
         """
         Checks if the performers in performerUploads are not already in the DB
 
@@ -478,7 +478,7 @@ class StashBoxPerformerManager:
 
         return draftCreate
     
-    def uploadPerformerImages(self, performer : t.Performer = None, exclude : [str] = []) -> [str]:
+    def uploadPerformerImages(self, performer : t.Performer = None, exclude : List[str] = []) -> List[str]:
         """
         Uploads the images stored in performer['images'] to the destination StashBox instance
 
@@ -555,7 +555,7 @@ class StashBoxPerformerManager:
 
         return callGraphQL(self.destinationEndpoint, gql, {'input' : input})['performerEdit']
 
-    def hasOpenDrafts(self, performer : t.Performer = None, stashBoxEndpoint : {} = None) -> bool:
+    def hasOpenDrafts(self, performer : t.Performer = None, stashBoxEndpoint : Dict = None) -> bool:
         gql = """
             query Query($input: ID!) {
                 findPerformer(id: $input) {
@@ -583,10 +583,10 @@ class StashBoxPerformerManager:
 
 class StashBoxPerformerHistory:
     performer : t.Performer
-    performerEdits : [t.PerformerEdit]
-    performerStates : [t.Performer]
+    performerEdits : List[t.PerformerEdit]
+    performerStates : List[t.Performer]
 
-    def __init__(self, stashBoxEndpoint : {}, performerId : str) -> None:
+    def __init__(self, stashBoxEndpoint : Dict, performerId : str) -> None:
         self.endpoint = stashBoxEndpoint
         self.performerEdits = []
         self.performerStates = {}
@@ -646,7 +646,7 @@ class StashBoxPerformerHistory:
         # Should only return False if an Edit only contains a remove_image, because we don't replicate this change for now
         return False
 
-    def _getInitialState(self, allEdits : [t.PerformerEdit]):
+    def _getInitialState(self, allEdits : List[t.PerformerEdit]):
         firstState = deepcopy(self.performer)
         firstState.pop('merged_ids')
         allEdits.reverse()

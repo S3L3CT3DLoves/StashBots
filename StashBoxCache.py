@@ -2,6 +2,7 @@ from datetime import datetime
 import glob
 import json
 import re
+from typing import List
 from StashBoxHelperClasses import StashSource
 import schema_types as t
 
@@ -17,7 +18,7 @@ class StashBoxCache:
         self.stashBoxConnectionParams = stashBoxConnection
         self.stashBoxInstance = stashBoxInstance
     
-    def getCache(self) -> [t.Performer]:
+    def getCache(self) -> List[t.Performer]:
         return self.performers
     
     def loadCacheFromFile(self):
