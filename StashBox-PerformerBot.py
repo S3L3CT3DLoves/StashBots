@@ -80,11 +80,9 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
         concatUrls = [json.loads(data) for data in concatUrls]
         updateInput["urls"] = concatUrls
 
-        print("Loading existing images")
-        existingImgs = list(map(lambda x: getImgB64(x['url']),performer.get("images", [])))
         print("Uploading new images")
-        newImgs = perfManager.uploadPerformerImages(exclude=existingImgs)
-        updateInput["image_ids"] = newImgs + list(map(lambda x: x['id'],performer.get("images", [])))
+        newImgs = perfManager.uploadPerformerImages(exclude=performer.get("images", []))
+        updateInput["image_ids"] = list(set(newImgs + list(map(lambda x: x['id'],performer.get("images", [])))))
 
 
         perfManager.submitPerformerUpdate(performer["id"], updateInput, comment)
@@ -127,11 +125,8 @@ def manualUpdatePerformer(stash : StashInterface, source : StashSource, destinat
     draft["urls"] = concatUrls
     
 
-    print("Loading existing images")
-    existingImgs = list(map(lambda x: getImgB64(x['url']),performer.get("images", [])))
-    print("Uploading new images")
-    newImgs = sourcePerf.uploadPerformerImages(exclude=existingImgs)
-    draft["image_ids"] = newImgs + list(map(lambda x: x['id'],performer.get("images", [])))
+    newImgs = sourcePerf.uploadPerformerImages(exclude=performer.get("images", []))
+    draft["image_ids"] = newImgs
     sourcePerf.submitPerformerUpdate(performer["id"], draft, comment, False)
 
     print(f"{performer['name']} updated")

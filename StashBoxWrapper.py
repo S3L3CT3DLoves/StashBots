@@ -82,7 +82,7 @@ def callGraphQL(stashBoxEndpoint, query, variables={}):
     
     return handleGQLResponse(response)
 
-def upload_image(destinationEndpoint, image_in, exclude = []):
+def upload_image(destinationEndpoint, image_in, exclude = {}):
     if re.search(r';base64',image_in):
         m = re.search(r'data:(?P<mime>.+?);base64,(?P<img_data>.+)',image_in)
         mime = m.group("mime")
@@ -97,9 +97,9 @@ def upload_image(destinationEndpoint, image_in, exclude = []):
     if not b64img_bytes:
         raise Exception("upload_image requires a base64 string or url")
     
-    if b64img_bytes in exclude:
+    if b64img_bytes in exclude.keys():
         print("Skipping image, already existing")
-        return None
+        return {"id" : exclude[b64img_bytes]}
     
     body, multipart_header = encode_multipart_formdata({
         'operations':'{"operationName":"AddImage","variables":{"imageData":{"file":null}},"query":"mutation AddImage($imageData: ImageCreateInput!) {imageCreate(input: $imageData) {id url}}"}',
@@ -449,10 +449,15 @@ class StashBoxPerformerManager:
         imageIds = []
         counter = 0
         allImgs = performer.get("images", [])
+        print("Loading existing images")
+        existingImgs = {}
+        for img in exclude:
+            existingImgs[getImgB64(img["url"])] = img["id"]
+
         for image in allImgs:
             counter +=1
             print(f"Uploading image {counter} of {len(allImgs)}")
-            imageId = upload_image(self.destinationEndpoint, image['url'], exclude)
+            imageId = upload_image(self.destinationEndpoint, image['url'], existingImgs)
             if imageId:
                 imageIds.append(imageId["id"])
         
