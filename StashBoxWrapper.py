@@ -586,6 +586,8 @@ class StashBoxPerformerHistory:
         return
 
     def _checkStateChange(self, changes : t.PerformerEdit) -> bool:
+        if changes["details"] == None:
+            return True
         # Checks if there are **applicable** changes in the Edit
         for attr in ["name","disambiguation","gender","birthdate", "birth_date","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
             if changes['details'].get(attr) and changes['details'].get(attr) != "":
@@ -608,6 +610,10 @@ class StashBoxPerformerHistory:
         allEdits.reverse()
 
         for edit in allEdits:
+            if edit["details"] == None:
+                # Some Edits don't have any changes except a MERGE action
+                continue
+
             # Reverse the Edit actions
             for attr in ["created","closed","name","disambiguation","gender","birthdate","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
                 if edit['details'].get(attr):
@@ -754,6 +760,9 @@ class StashBoxPerformerHistory:
     def applyPerformerUpdate(currentPerformer : t.Performer, editChanges : t.PerformerEdit) -> t.Performer:
         newState = deepcopy(currentPerformer)
 
+        if "details" not in editChanges.keys() or editChanges["details"] == None:
+            return newState
+
         for attr in ["name","disambiguation","gender","birthdate", "birth_date","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year", "created", "updated", "deleted"]:
             if editChanges['details'].get(attr):
                 newState[attr] = editChanges['details'][attr]
@@ -769,7 +778,8 @@ class StashBoxPerformerHistory:
         for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_urls"]:
             if editChanges['details'].get(attr):
                 for x in editChanges['details'].get(attr):
-                    newState[attr.split('_')[1]].remove(x)
+                    if x in newState[attr.split('_')[1]]:
+                        newState[attr.split('_')[1]].remove(x)
         
         if editChanges['details'].get("removed_images"):
             for x in editChanges['details'].get("removed_images"):
