@@ -1,7 +1,7 @@
 GET_PERFORMER = """
 query Query($input: ID!) {
     findPerformer(id: $input) {
-        ... PerformerFragment
+        ... PerformerFragmentWidthEdits
     }
 }
 """

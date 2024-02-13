@@ -69,7 +69,7 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
     incomplete = sourcePerformerHistory.isIncomplete(latestUpdateSource, performer)
     compare = sourcePerformerHistory.compareAtDateTime(latestUpdateSource, performer)
     if (hasUpdate or incomplete) and compare:
-        print(f"Ready to update {performer['name']}")
+        print(f"Ready to update {performer['name']} : Performer { '/ has Update' if hasUpdate else '' } { '/ is incomplete' if incomplete else '' }")
 
         updateInput = perfManager.asPerformerEditDetailsInput()
 
@@ -244,7 +244,7 @@ if __name__ == '__main__':
         #Now actually do the update
         plist = list(reversed(performersList))
         for performer in plist:
-            status = updatePerformer(stash, SOURCE, TARGET, performer, args.comment, args.output, cache=sourceCacheMgr.cache)
+            status = updatePerformer(stash, SOURCE, TARGET, performer, args.comment, args.output, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
             if status == ReturnCode.SUCCESS:
                 count += 1
                 print(f"{performer['name']} updated")
@@ -268,7 +268,7 @@ if __name__ == '__main__':
 
     elif sys.argv[0].lower() == "create":
         print("Creation mode")
-        createPerformers(stash, SOURCE, TARGET, getPerformerUploadsFromStash(stash, SOURCE, TARGET), args.comment, cache=sourceCacheMgr.cache)
+        createPerformers(stash, SOURCE, TARGET, getPerformerUploadsFromStash(stash, SOURCE, TARGET), args.comment, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
 
     elif sys.argv[0].lower() == "manual":
         print("Manual Update mode")

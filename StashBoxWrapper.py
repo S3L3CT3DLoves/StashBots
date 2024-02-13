@@ -550,24 +550,23 @@ class StashBoxPerformerHistory:
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
-        perfData : t.Performer = callGraphQL(self.endpoint,GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
-        self.performer = perfData
-        
-        editsResponse = callGraphQL(self.endpoint, GQLQ.GET_PERFORMER_EDITS, {'input': {
-            "applied": True,
-            "target_id": performerId,
-            "target_type": "PERFORMER"
-        }})["queryEdits"]
+        if self.cache != None:
+            self.performer = self.cache.getPerformerById(performerId)
+        else:
+            perfData : t.Performer = callGraphQL(self.endpoint,GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
+            self.performer = perfData
 
-        if int(editsResponse["count"]) == 0:
+        edits = self.performer["edits"]
+
+        if len(edits) == 0:
             # There are no Edits, an issue when the DB was imported initially // Create a fake Edit for the initial submit
             self.performerStates[stashDateToDateTime(self.performer["created"])] = {
                 "details" : self.performer,
                 "closed" : self.performer["created"]
             }
         else:
-            createEdit = [edit for edit in editsResponse["edits"] if edit['operation'] == "CREATE"]
-            self.performerEdits = [edit for edit in editsResponse["edits"] if edit['operation'] in ["MODIFY", "MERGE"]]
+            createEdit = [edit for edit in edits if edit['operation'] == "CREATE"]
+            self.performerEdits = [edit for edit in edits if edit['operation'] in ["MODIFY", "MERGE"]]
             self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
             if len(createEdit) > 0 and createEdit[0]["details"] != None:
                 initial = createEdit[0]
@@ -746,16 +745,11 @@ class StashBoxPerformerHistory:
         return False
 
     def hasUpdate(self, targetDate : datetime, performer : t.Performer = None) -> bool:
-        # dates = list(self.performerStates.keys())
-        # dates.sort()
-        # id = bisect.bisect_right(dates,targetDate)
-        # return id < len(dates)
-
-        if performer == None:
-            performer = self.performer
-
-        latestUpdate = stashDateToDateTime(self.performer["updated"])
-        return latestUpdate > targetDate
+        # Cannot simply use the Update value due to not replicating some changes (see _checkStateChange)
+        dates = list(self.performerStates.keys())
+        dates.sort()
+        id = bisect.bisect_right(dates,targetDate)
+        return id < len(dates)
     
     def applyPerformerUpdate(currentPerformer : t.Performer, editChanges : t.PerformerEdit) -> t.Performer:
         newState = deepcopy(currentPerformer)
@@ -836,15 +830,19 @@ class StashBoxCacheManager:
             if edit["operation"] == "CREATE":
                 perf = StashBoxPerformerHistory.applyPerformerUpdate({}, edit)
                 perf["id"] = edit["target"]["id"]
+                perf["updated"] = edit["closed"]
+                perf["created"] = edit["target"]["created"]
                 self.cache.performers.append(perf)
             elif edit["operation"] == "DESTROY":
                 self.cache.deletePerformerById(targetPerformerId)
             elif edit["operation"] == "MODIFY":
-                self.updatePerformer(targetPerformerId, edit)
+                perf = self.updatePerformer(targetPerformerId, edit)
+                perf["updated"] = edit["closed"]
             elif edit["operation"] == "MERGE":
                 mergedIds = list(map( lambda source: source["id"] ,edit["merge_sources"]))
                 print(f"Merging {mergedIds}")
-                self.updatePerformer(targetPerformerId, edit)
+                perf = self.updatePerformer(targetPerformerId, edit)
+                perf["updated"] = edit["closed"]
                 for id in mergedIds:
                     self.cache.deletePerformerById(id)
         
@@ -854,9 +852,10 @@ class StashBoxCacheManager:
     def saveCache(self):
         self.cache.saveCacheToFile()
 
-    def updatePerformer(self, performerId, edit : t.PerformerEdit):
+    def updatePerformer(self, performerId, edit : t.PerformerEdit) -> t.Performer:
         performerIdx = self.cache._getPerformerIdxById(performerId)
         if performerIdx == None:
             # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
             return
         self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.cache.performers[performerIdx], edit)
+        return self.cache.performers[performerIdx]

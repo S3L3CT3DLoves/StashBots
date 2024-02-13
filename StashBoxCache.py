@@ -46,7 +46,7 @@ class StashBoxCache:
     def getPerformerById(self, performerId) -> t.Performer:
         result = None
         try:
-            result = [perf for perf in self.performers if perf.id == performerId][0]
+            result = [perf for perf in self.performers if perf["id"] == performerId][0]
         except:
             pass
         return result
