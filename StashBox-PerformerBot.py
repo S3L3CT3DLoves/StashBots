@@ -6,11 +6,12 @@ from requests import get
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource
 import schema_types as t
-from StashBoxWrapper import ComparisonReturnCode, StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, stashDateToDateTime, getImgB64, StashBoxCacheManager
+from StashBoxWrapper import ComparisonReturnCode, StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, getOpenEdits, stashDateToDateTime, getImgB64, StashBoxCacheManager
 from stashapi.stashapp import StashInterface
 
 
 siteMapper = StashBoxSitesMapper()
+stash : StashInterface
 
 class ReturnCode(Enum):
     SUCCESS = 1
@@ -20,7 +21,7 @@ class ReturnCode(Enum):
     DIFF_IMG = -3
     ERROR = -99
 
-def createPerformers(stash : StashInterface, source : StashSource, destination : StashSource, uploads : List[PerformerUploadConfig], comment : str, cache : StashBoxCache = None):
+def createPerformers(source : StashSource, destination : StashSource, uploads : List[PerformerUploadConfig], comment : str, cache : StashBoxCache = None):
     stashFilter = StashBoxFilterManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[destination]['url']))
 
     print("Checking if performers are already added in Edits")
@@ -50,7 +51,7 @@ def createPerformers(stash : StashInterface, source : StashSource, destination :
 
         print(f"Performer Edit submitted : {siteMapper.SOURCE_INFOS[destination]['url']}edits/{submitted['id']}")
 
-def updatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer, comment : str, outputFileStream = None, cache : StashBoxCache = None) -> ReturnCode:
+def updatePerformer(source : StashSource, destination : StashSource, performer : t.Performer, comment : str, outputFileStream = None, cache : StashBoxCache = None) -> ReturnCode:
     sourceUrl = [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[source]['url'])][0]['url']
     sourceId = sourceUrl.split('/').pop()
     latestUpdateSource = stashDateToDateTime(performer["updated"])
@@ -103,7 +104,7 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
     else:
        return ReturnCode.NO_NEED
 
-def manualUpdatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer, sourceId : str, comment : str, cache : StashBoxCache = None):
+def manualUpdatePerformer(source : StashSource, destination : StashSource, performer : t.Performer, sourceId : str, comment : str, cache : StashBoxCache = None):
     """
     ### Summary
     Force update of a Performer based on the source and sourceId, not performing any checks
@@ -137,7 +138,7 @@ def manualUpdatePerformer(stash : StashInterface, source : StashSource, destinat
 
     print(f"{performer['name']} updated")
 
-def getPerformerUploadsFromStash(stash : StashInterface, source : StashSource, destination : StashSource) -> List[PerformerUploadConfig]:
+def getPerformerUploadsFromStash(source : StashSource, destination : StashSource) -> List[PerformerUploadConfig]:
     sourceEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[source]['url']}graphql"
     destinationEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[destination]['url']}graphql"
 
@@ -167,6 +168,37 @@ def getPerformerUploadsFromStash(stash : StashInterface, source : StashSource, d
         , TO_UPLOAD
     ))
     return TO_UPLOAD
+
+def filterPerformersForUpdate(performersList : List[t.Performer], source : StashSource, target : StashSource) -> List[t.Performer]:
+    newList = []
+    openEdits = getOpenEdits(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[target]['url']))
+    performersWithOpenEdits = list(map(
+        lambda edit : edit["target"]["id"],
+        filter(
+            lambda edit : edit["operation"] in ["MODIFY", "DESTROY"],
+            openEdits
+        )
+    ))
+    for performer in performersList:
+        if performer.get("urls"):
+            if performer["id"] in performersWithOpenEdits:
+                # Performer has an open Edit, skip
+                continue
+
+            if [url for url in performer['urls'] if siteMapper.isStashBoxLink(url['url'], source)] == []:
+                # Performer has no link to source
+                continue
+            
+            if siteMapper.countStashBoxLinks([url["url"] for url in performer["urls"]]) != 1:
+                # Performer has more than one StashBox link, for now this is not supported
+                continue
+
+            newList.append(performer)
+
+    return newList
+
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -239,24 +271,13 @@ if __name__ == '__main__':
             sourceCacheMgr.loadCache(True, 24, 7)
 
         print("Parsing list of performers to update")
-        # Filter to only keep performers who have a link to the SOURCE
-        performersList = filter(
-            lambda performer: [url for url in performer['urls'] if siteMapper.isStashBoxLink(url['url'], SOURCE)] != [],
-            filter(
-                lambda performer: performer.get("urls"),
-                   targetCacheMgr.cache.getCache())
-        )
-        # Remove performers who have links to 2 StashBox sources, no way to decide which is the "right" one to use as the main source
-        performersList = list(filter(
-            lambda performer : siteMapper.countStashBoxLinks([url["url"] for url in performer["urls"]]) == 1,
-            performersList
-        ))
+        performersList = filterPerformersForUpdate(targetCacheMgr.cache.getCache(), SOURCE, TARGET)
         print(f"There are {len(performersList)} to review")
         
         #Now actually do the update
         plist = list(reversed(performersList))
         for performer in plist:
-            status = updatePerformer(stash, SOURCE, TARGET, performer, args.comment, args.output, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
+            status = updatePerformer(SOURCE, TARGET, performer, args.comment, args.output, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
             if status == ReturnCode.SUCCESS:
                 count += 1
                 print(f"{performer['name']} updated")
@@ -280,7 +301,7 @@ if __name__ == '__main__':
 
     elif sys.argv[0].lower() == "create":
         print("Creation mode")
-        createPerformers(stash, SOURCE, TARGET, getPerformerUploadsFromStash(stash, SOURCE, TARGET), args.comment, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
+        createPerformers(SOURCE, TARGET, getPerformerUploadsFromStash(SOURCE, TARGET), args.comment, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
 
     elif sys.argv[0].lower() == "manual":
         print("Manual Update mode")
@@ -293,7 +314,7 @@ if __name__ == '__main__':
                 performerGetter = StashBoxPerformerManager(stash, TARGET, TARGET, siteMapper)
                 performerGetter.getPerformer(perf['targetId'])
                 if not performerGetter.hasOpenDrafts():
-                    manualUpdatePerformer(stash, SOURCE, TARGET, performerGetter.performer, perf['sourceId'],args.comment)
+                    manualUpdatePerformer(SOURCE, TARGET, performerGetter.performer, perf['sourceId'],args.comment)
                 else:
                     print(f"Has Draft already {perf['name']}")
             else:

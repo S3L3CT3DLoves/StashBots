@@ -177,7 +177,7 @@ def getAllPerformers(sourceEndpoint : Dict, callback = None):
     
     return returnData
 
-def getAllEdits(sourceEndpoint : Dict, limit = 7, callback = None):
+def getAllEdits(endpoint : Dict, limit = 7, callback = None):
     dateLimit = datetime.now() - timedelta(days=limit)
 
     returnData = []
@@ -189,7 +189,8 @@ def getAllEdits(sourceEndpoint : Dict, limit = 7, callback = None):
         "per_page" : 100
     }
 
-    response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
+    print(f"GetAllEdits page 1")
+    response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
     returnData = response["edits"]
     pages = math.ceil(response["count"] / query["per_page"])
     while query["page"] < pages:
@@ -198,7 +199,7 @@ def getAllEdits(sourceEndpoint : Dict, limit = 7, callback = None):
 
         # Avoid overloading the server
         time.sleep(5)
-        response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
+        response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
         returnData.extend(response["edits"])
         if callback != None:
             callback(response["edits"])
@@ -206,6 +207,31 @@ def getAllEdits(sourceEndpoint : Dict, limit = 7, callback = None):
         if stashDateToDateTime(response["edits"][-1]["closed"]) < dateLimit:
             print(f"All edits for past {limit} days loaded, GetAllEdits done")
             break
+    
+    return returnData
+
+def getOpenEdits(endpoint : Dict):
+    returnData = []
+    pages = -1
+    query = {
+        "target_type" : "PERFORMER",
+        "status" : "PENDING",
+        "page" : 1,
+        "per_page" : 100
+    }
+
+    print(f"GetOpenEdits page 1")
+    response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
+    returnData = response["edits"]
+    pages = math.ceil(response["count"] / query["per_page"])
+    while query["page"] < pages:
+        query["page"] += 1
+        print(f"GetOpenEdits page {query['page']} of {pages}")
+
+        # Avoid overloading the server
+        time.sleep(5)
+        response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
+        returnData.extend(response["edits"])
     
     return returnData
 
