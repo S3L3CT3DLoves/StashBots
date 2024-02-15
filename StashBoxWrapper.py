@@ -254,7 +254,6 @@ class StashBoxSitesMapper:
         mappingElm = [element for element in self.SITE_IDS_MAP if element[source.name] == siteId]
         return len(mappingElm) > 0 and mappingElm[0][destination.name] != ""
 
-
     def mapUrlToEdit(self, url, source : StashSource = None, destination : StashSource = None) -> Dict:
         if source == None:
             source = self.SOURCE
@@ -267,7 +266,29 @@ class StashBoxSitesMapper:
                     "url" : url["url"],
                     "site_id" : destinationId[0]
                 }
-        return {}
+    
+    def isStashBoxLink(self, url : str, target : StashSource) -> bool:
+        """
+        Returns True if the url matches the pattern for target
+        """
+        return url.startswith(self.SOURCE_INFOS[target]['url'])
+    
+    def whichStashBoxLink(self, url : str) -> StashSource:
+        """
+        If the url is a link to a StashBox page, return the appropriate StashSource
+        """
+        for source in self.SOURCE_INFOS.keys():
+            if self.isStashBoxLink(url, source):
+                return source
+    
+    def countStashBoxLinks(self, urls : List[str]) -> int:
+        counter = 0
+        for url in urls:
+            if self.whichStashBoxLink(url) != None:
+                counter += 1
+        
+        return counter
+
 
 class StashBoxFilterManager:
     stashBoxEndpoint : Dict

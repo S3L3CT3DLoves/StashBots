@@ -238,13 +238,20 @@ if __name__ == '__main__':
             print("Using local cache for SOURCE")
             sourceCacheMgr.loadCache(True, 24, 7)
 
-        performersList = list(filter(
-            lambda performer: [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url'])] != [],
+        print("Parsing list of performers to update")
+        # Filter to only keep performers who have a link to the SOURCE
+        performersList = filter(
+            lambda performer: [url for url in performer['urls'] if siteMapper.isStashBoxLink(url['url'], SOURCE)] != [],
             filter(
                 lambda performer: performer.get("urls"),
                    targetCacheMgr.cache.getCache())
+        )
+        # Remove performers who have links to 2 StashBox sources, no way to decide which is the "right" one to use as the main source
+        performersList = list(filter(
+            lambda performer : siteMapper.countStashBoxLinks([url["url"] for url in performer["urls"]]) == 1,
+            performersList
         ))
-        print(len(performersList))
+        print(f"There are {len(performersList)} to review")
         
         #Now actually do the update
         plist = list(reversed(performersList))
