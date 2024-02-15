@@ -608,33 +608,6 @@ class StashBoxPerformerManager:
 
         return callGraphQL(self.destinationEndpoint, gql, {'input' : input})['performerEdit']
 
-    def hasOpenDrafts(self, performer : t.Performer = None, stashBoxEndpoint : Dict = None) -> bool:
-        print("TODO - FIX OPEN DRAFTS")
-        gql = """
-            query Query($input: ID!) {
-                findPerformer(id: $input) {
-                    edits {
-                    id
-                    status
-                    operation
-                    }
-                }
-            }
-        """
-
-        if performer == None:
-            performer = self.performer
-        
-        if stashBoxEndpoint == None:
-            stashBoxEndpoint = self.sourceEndpoint
-        
-        openDrafts = callGraphQL(stashBoxEndpoint, gql, {'input' : performer['id']})['findPerformer']['edits']
-        openDrafts = list(filter(
-            lambda draft: draft["status"] == "PENDING"
-            ,openDrafts
-        ))
-        return len(openDrafts) > 0
-
 class StashBoxPerformerHistory:
     performer : t.Performer
     performerEdits : List[t.PerformerEdit]

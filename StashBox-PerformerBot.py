@@ -60,9 +60,6 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
     perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache)
     perfManager.setPerformer(sourcePerformerHistory.performer)
 
-    if perfManager.hasOpenDrafts(performer, stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[destination]['url'])):
-        return ReturnCode.HAS_DRAFT
-
     #Bugfix for non-iso country names
     if performer.get("country"):
         performer["country"] = convertCountry(performer.get("country"))
