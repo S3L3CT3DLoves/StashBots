@@ -14,6 +14,31 @@ import pycountry
 import StashBoxWrapperGQLQueries as GQLQ
 
 
+class ComparisonReturnCode(Enum):
+    IDENTICAL       = 1
+    gender          = -1
+    ethnicity       = -2
+    country         = -3
+    eye_color       = -4
+    hair_color      = -5
+    height          = -6
+    cup_size        = -7
+    band_size       = -8
+    waist_size      = -9
+    hip_size        = -10
+    breast_type     = -11
+    career_start_year = -12
+    career_end_year = -13
+    name            = -14
+    birth_date      = -15
+    disambiguation  = -16
+    tatoos          = -17
+    piercings       = -18
+    aliases         = -19
+    images          = -20
+    urls            = -21
+    ERROR = -99
+
 def convertCountry(name):
     if len(name) == 2:
         return name
@@ -208,20 +233,41 @@ class StashBoxSitesMapper:
             }
         }
     }
+    SOURCE : StashSource
+    DESTINATION : StashSource
 
-    def __init__(self, configFile : str = "site_ids_map.csv") -> None:
+    def __init__(self, source : StashSource = None, destination: StashSource = None, configFile : str = "site_ids_map.csv") -> None:
+        self.SOURCE = source
+        self.DESTINATION = destination
         with open(configFile, mode='r') as file:
             csvFile = csv.DictReader(file)
+            self.SITE_IDS_MAP = []
             for line in csvFile:
                 self.SITE_IDS_MAP.append(line)
 
-    def mapUrlToEdit(self, url, source : StashSource, destination : StashSource):
+    def siteHasMapping(self, siteId : str, source : StashSource = None, destination : StashSource = None) -> bool:
+        if source == None:
+            source = self.SOURCE
+        if destination == None:
+            destination = self.DESTINATION
+
+        mappingElm = [element for element in self.SITE_IDS_MAP if element[source.name] == siteId]
+        return len(mappingElm) > 0 and mappingElm[0][destination.name] != ""
+
+
+    def mapUrlToEdit(self, url, source : StashSource = None, destination : StashSource = None) -> Dict:
+        if source == None:
+            source = self.SOURCE
+        if destination == None:
+            destination = self.DESTINATION
+        
         destinationId = [element[destination.name] for element in self.SITE_IDS_MAP if element[source.name] == url["site"]["id"]]
         if destinationId != []:
             return {
                     "url" : url["url"],
                     "site_id" : destinationId[0]
                 }
+        return {}
 
 class StashBoxFilterManager:
     stashBoxEndpoint : Dict
@@ -516,6 +562,7 @@ class StashBoxPerformerManager:
         return callGraphQL(self.destinationEndpoint, gql, {'input' : input})['performerEdit']
 
     def hasOpenDrafts(self, performer : t.Performer = None, stashBoxEndpoint : Dict = None) -> bool:
+        print("TODO - FIX OPEN DRAFTS")
         gql = """
             query Query($input: ID!) {
                 findPerformer(id: $input) {
@@ -546,12 +593,14 @@ class StashBoxPerformerHistory:
     performerEdits : List[t.PerformerEdit]
     performerStates : List[t.Performer]
     cache : StashBoxCache
+    siteMapper : StashBoxSitesMapper
 
-    def __init__(self, stashBoxEndpoint : Dict, performerId : str, cache : StashBoxCache = None) -> None:
+    def __init__(self, stashBoxEndpoint : Dict, performerId : str, cache : StashBoxCache = None, siteMapper : StashBoxSitesMapper = None) -> None:
         self.endpoint = stashBoxEndpoint
         self.performerEdits = []
         self.performerStates = {}
         self.cache = cache
+        self.siteMapper = siteMapper if siteMapper != None else StashBoxSitesMapper()
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
@@ -598,15 +647,21 @@ class StashBoxPerformerHistory:
             if changes['details'].get(attr) and changes['details'].get(attr) != "":
                 return True
 
-        for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images", "added_urls"]:
+        for attr in ["added_aliases", "added_tattoos", "added_piercings", "added_images"]:
             if changes['details'].get(attr) and changes['details'].get(attr) != "":
                 return True
 
-        for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_urls"]:
+        for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images"]:
             if changes['details'].get(attr) and changes['details'].get(attr) != "":
                 return True
+            
+        for attr in ["removed_urls", "added_urls"]:
+            if changes['details'].get(attr) and len(changes['details'].get(attr)) > 0:
+                for url in changes['details'].get(attr):
+                    if self.siteMapper.siteHasMapping(url["site"]["id"]):
+                        return True
         
-        # Should only return False if an Edit only contains a remove_image, because we don't replicate this change for now
+        # Should return False if the only change is affecting URLs which are not mapped in the destination StashBox
         return False
 
     def _getInitialState(self, allEdits : List[t.PerformerEdit]):
@@ -661,48 +716,44 @@ class StashBoxPerformerHistory:
         
         return self.performerStates[dates[id-1]]
 
-    def compareAtDateTime(self, targetDate : datetime, compareTo : t.Performer) -> bool:
+    def compareAtDateTime(self, targetDate : datetime, compareTo : t.Performer) -> List[ComparisonReturnCode]:
         """
         Returns True if the performer history at the target time is identical to compareTo
         """
+        returnCodes = []
         localPerf = self.getByDateTime(targetDate)
 
         for attr in ["name","gender","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
             compareValue = compareTo.get(attr)
             localValue = localPerf.get(attr)
-
-
             if compareValue and localValue:
                 if compareValue != localValue:
-                    print(f"Compare {attr}: SOURCE:{localValue} and TARGET:{compareValue}")
-                    return False
+                    # Values are different
+                    returnCodes.append(ComparisonReturnCode[attr])
             elif compareValue or localValue:
-                print(f"Only one {attr} exists !")
-                return False
+                # Only one of the values exists
+                returnCodes.append(ComparisonReturnCode[attr])
         
         # Handle birthday separately, it's a mess due to the var change
         compareValue = compareTo.get("birth_date", compareTo.get("birthdate"))
         localValue = localPerf.get("birth_date", localPerf.get("birthdate"))
         if compareValue and localValue:
             if compareValue != localValue:
-                # TODO - Handle dates where day / month is missing (eg: 2002 vs 2002-01-01)
                 if len(compareValue) != len(localValue):
                     # One of the dates is a short date, the other is not
                     dateChecker = "^(\\d{4})-01-01"
                     if len(compareValue) == 4:
                         localCheck = re.match(dateChecker, localValue)
                         if compareValue != localCheck.group(1):
-                            return False
+                            returnCodes.append(ComparisonReturnCode.birth_date)
                     elif len(localValue) == 4:
                         check = re.match(dateChecker, compareValue)
                         if localValue != check.group(1):
-                            return False
+                            returnCodes.append(ComparisonReturnCode.birth_date)
                 else:
-                    print(f"Compare birthday: SOURCE:{localValue} and TARGET:{compareValue}")
-                    return False
+                    returnCodes.append(ComparisonReturnCode.birth_date)
         elif compareValue and not localValue:
-            print("Birthdate has been added to TARGET !")
-            return False
+            returnCodes.append(ComparisonReturnCode.birth_date)
             
         for attr in ["disambiguation","tatoos", "piercings"]:
             # These are not properly passed when scraping & uploading, so not taking them into account
@@ -713,19 +764,20 @@ class StashBoxPerformerHistory:
         localValue = localPerf.get("aliases")
         if compareValue and localValue:
             if set(compareValue) != set(localValue):
-                print(f"Compare aliases: SOURCE:{localValue} and TARGET:{compareValue}")
-                return False
-        elif compareValue and not localValue:
-            print(f"Alias has been added to TARGET !")
-            return False
+                returnCodes.append(ComparisonReturnCode.aliases)
+        elif compareValue or localValue:
+            # Only one value exists
+            returnCodes.append(ComparisonReturnCode.aliases)
         
         localImgs = localPerf.get("images", [])
         compareImgs = compareTo.get("images", [])
         if len(compareImgs) > 1 and len(localImgs) != len(compareImgs):
-            print("The list of images has been edited")
-            return False
+            # The list of images has been edited
+            returnCodes.append(ComparisonReturnCode.images)
 
-        return True
+        if len(returnCodes) == 0:
+            returnCodes = [ComparisonReturnCode.IDENTICAL]
+        return returnCodes
     
     def isIncomplete(self, targetDate : datetime, compareTo : t.Performer) -> bool:
         # Due to Stash / StashBox incompatibilities, some values are not properly parsed when creating performers manually. Try to detect if the performer needs to be fixed

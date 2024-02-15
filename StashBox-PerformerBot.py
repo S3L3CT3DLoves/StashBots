@@ -6,7 +6,7 @@ from requests import get
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource
 import schema_types as t
-from StashBoxWrapper import StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, stashDateToDateTime, getImgB64, StashBoxCacheManager
+from StashBoxWrapper import ComparisonReturnCode, StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, stashDateToDateTime, getImgB64, StashBoxCacheManager
 from stashapi.stashapp import StashInterface
 
 
@@ -17,6 +17,7 @@ class ReturnCode(Enum):
     HAS_DRAFT = 0
     NO_NEED = -1
     DIFF = -2
+    DIFF_IMG = -3
     ERROR = -99
 
 def createPerformers(stash : StashInterface, source : StashSource, destination : StashSource, uploads : List[PerformerUploadConfig], comment : str, cache : StashBoxCache = None):
@@ -54,7 +55,7 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
     sourceId = sourceUrl.split('/').pop()
     latestUpdateSource = stashDateToDateTime(performer["updated"])
 
-    sourcePerformerHistory = StashBoxPerformerHistory(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url']), sourceId, cache)
+    sourcePerformerHistory = StashBoxPerformerHistory(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url']), sourceId, cache, siteMapper)
     perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache)
     perfManager.setPerformer(sourcePerformerHistory.performer)
 
@@ -67,35 +68,40 @@ def updatePerformer(stash : StashInterface, source : StashSource, destination : 
 
     hasUpdate = sourcePerformerHistory.hasUpdate(latestUpdateSource)
     incomplete = sourcePerformerHistory.isIncomplete(latestUpdateSource, performer)
-    compare = sourcePerformerHistory.compareAtDateTime(latestUpdateSource, performer)
-    if (hasUpdate or incomplete) and compare:
-        print(f"Ready to update {performer['name']} : Performer { '/ has Update' if hasUpdate else '' } { '/ is incomplete' if incomplete else '' }")
-
-        updateInput = perfManager.asPerformerEditDetailsInput()
-
-        # Keep existing links to avoid removing data (need to map to string to dedup)
-        existingUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
-        concatUrls = [json.dumps(data, sort_keys=True) for data in existingUrls + updateInput["urls"]]
-        concatUrls = list(set(concatUrls))
-        concatUrls = [json.loads(data) for data in concatUrls]
-        updateInput["urls"] = concatUrls
-
-        print("Uploading new images")
-        newImgs = perfManager.uploadPerformerImages(exclude=performer.get("images", []))
-        updateInput["image_ids"] = list(set(newImgs + list(map(lambda x: x['id'],performer.get("images", [])))))
-
-
-        perfManager.submitPerformerUpdate(performer["id"], updateInput, comment)
-        return ReturnCode.SUCCESS
-    else:
-        if not hasUpdate and not incomplete:
-            return ReturnCode.NO_NEED
-        if not compare:
-            if outputFileStream is not None:
-                print(f"{performer['name']},{performer['id']},{perfManager.performer['id']},DIFF,False", file=outputFileStream)
-            return ReturnCode.DIFF
     
-    return ReturnCode.ERROR
+    if (hasUpdate or incomplete):
+        compare = sourcePerformerHistory.compareAtDateTime(latestUpdateSource, performer)
+
+        if compare == [ComparisonReturnCode.IDENTICAL]:
+            print(f"Ready to update {performer['name']} : Performer { '/ has Update' if hasUpdate else '' } { '/ is incomplete' if incomplete else '' }")
+
+            updateInput = perfManager.asPerformerEditDetailsInput()
+
+            # Keep existing links to avoid removing data (need to map to string to dedup)
+            existingUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
+            concatUrls = [json.dumps(data, sort_keys=True) for data in existingUrls + updateInput["urls"]]
+            concatUrls = list(set(concatUrls))
+            concatUrls = [json.loads(data) for data in concatUrls]
+            concatUrls = list(filter(
+                lambda url : url != {},
+                concatUrls
+            ))
+            updateInput["urls"] = concatUrls
+
+            print("Uploading new images")
+            newImgs = perfManager.uploadPerformerImages(exclude=performer.get("images", []))
+            updateInput["image_ids"] = newImgs
+
+
+            perfManager.submitPerformerUpdate(performer["id"], updateInput, comment)
+            return ReturnCode.SUCCESS
+        else:
+            if outputFileStream is not None:
+                differences = ";".join(map(lambda x: x.name, compare))
+                print(f"{performer['name']},{performer['id']},{perfManager.performer['id']},{differences},False", file=outputFileStream)
+            return ReturnCode.DIFF
+    else:
+       return ReturnCode.NO_NEED
 
 def manualUpdatePerformer(stash : StashInterface, source : StashSource, destination : StashSource, performer : t.Performer, sourceId : str, comment : str, cache : StashBoxCache = None):
     """
@@ -213,6 +219,8 @@ if __name__ == '__main__':
 
     SOURCE = StashSource[args.source_stashbox]
     TARGET = StashSource[args.target_stashbox]
+    siteMapper.SOURCE = SOURCE
+    siteMapper.DESTINATION = TARGET
 
     sourceCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url']), SOURCE, True) if args.source_cache else None
     targetCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']), TARGET, True)
@@ -232,7 +240,9 @@ if __name__ == '__main__':
 
         performersList = list(filter(
             lambda performer: [url for url in performer['urls'] if url['url'].startswith(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url'])] != [],
-            targetCacheMgr.cache.getCache()
+            filter(
+                lambda performer: performer.get("urls"),
+                   targetCacheMgr.cache.getCache())
         ))
         print(len(performersList))
         
