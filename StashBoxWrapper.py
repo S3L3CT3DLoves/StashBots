@@ -640,7 +640,7 @@ class StashBoxPerformerHistory:
             }
         else:
             createEdit = [edit for edit in edits if edit['operation'] == "CREATE"]
-            self.performerEdits = [edit for edit in edits if edit['operation'] in ["MODIFY", "MERGE"]]
+            self.performerEdits = [edit for edit in edits if edit['operation'] in ["MODIFY", "MERGE"] and edit['applied'] == True]
             self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
             if len(createEdit) > 0 and createEdit[0]["details"] != None:
                 initial = createEdit[0]
@@ -743,7 +743,7 @@ class StashBoxPerformerHistory:
         returnCodes = []
         localPerf = self.getByDateTime(targetDate)
 
-        for attr in ["name","gender","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
+        for attr in ["name","gender","ethnicity","country","eye_color","hair_color","height","hip_size","breast_type","career_start_year","career_end_year"]:
             compareValue = compareTo.get(attr)
             localValue = localPerf.get(attr)
             if compareValue and localValue:
@@ -775,9 +775,19 @@ class StashBoxPerformerHistory:
         elif compareValue and not localValue:
             returnCodes.append(ComparisonReturnCode.birth_date)
             
-        for attr in ["disambiguation","tatoos", "piercings"]:
-            # These are not properly passed when scraping & uploading, so not taking them into account
+        for attr in ["disambiguation","cup_size","band_size","waist_size"]:
+            # These are not properly passed when scraping & uploading, so not taking them into account if one is missing
+            compareValue = compareTo.get(attr)
+            localValue = localPerf.get(attr)
+            if compareValue and localValue:
+                if compareValue != localValue:
+                    # Values are different
+                    returnCodes.append(ComparisonReturnCode[attr])
+        
+        for attr in ["tatoos", "piercings"]:
+            # These are not properly passed when scraping & uploading, so not taking them into account for now
             pass
+            
 
         # Compare aliases
         compareValue = compareTo.get("aliases")
@@ -785,9 +795,6 @@ class StashBoxPerformerHistory:
         if compareValue and localValue:
             if set(compareValue) != set(localValue):
                 returnCodes.append(ComparisonReturnCode.aliases)
-        elif compareValue or localValue:
-            # Only one value exists
-            returnCodes.append(ComparisonReturnCode.aliases)
         
         localImgs = localPerf.get("images", [])
         compareImgs = compareTo.get("images", [])
