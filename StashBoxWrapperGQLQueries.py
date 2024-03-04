@@ -163,10 +163,6 @@ fragment PerformerEditFragment on PerformerEdit {
   hair_color
   height
   hip_size
-  images {
-    id
-    url
-  }
   name
   piercings {
     location

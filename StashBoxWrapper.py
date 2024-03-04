@@ -63,7 +63,11 @@ def convertCountry(name):
 def handleGQLResponse(response):
     try:
         if response.status_code == 200:
-            return response.json()['data']
+            jsonData = response.json()
+            if "errors" in jsonData and jsonData["errors"] != None:
+                print(f'Error in Stash call: {response.text}')
+                raise Exception(response.text)
+            return jsonData['data']
         else:
             print(f"Error in Stash call: {response.status_code}" )
     except Exception as e:
@@ -514,7 +518,7 @@ class StashBoxPerformerManager:
         birthdate = performer.get("birthdate", performer.get("birth_date"))
         if type(birthdate) is dict:
             birthdate = birthdate["date"]
-        draftCreate["birthdate"] = birthdate
+        draftCreate["birthdate"] = birthdate if birthdate != '' else None
 
         if performer.get("country"):
             draftCreate["country"] = convertCountry(performer.get("country"))

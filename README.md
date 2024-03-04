@@ -22,11 +22,11 @@ PMVSTASH and STASHDB are currently implemented, FANSDB will be added soon
 
 ## Usual commands
 
-Create mode : `python .\StashBox-PerformerBot.py -m create -ssb STASHDB -tsb PMVSTASH -s http://localhost:9999/ -c "[PBOT] StashDB Scrape"`
+Create mode : `python .\StashBox-PerformerBot.py create -ssb STASHDB -tsb PMVSTASH -s http://localhost:9999/ -c "[PBOT] StashDB Scrape"`
 
-Update mode : `python .\StashBox-PerformerBot.py -m update -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update" -l 5 -o manualcheck_output.csv`
+Update mode : `python .\StashBox-PerformerBot.py update -sc -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update" -l 5 -o manualcheck_output.csv`
 
-Manual mode : `python .\StashBox-PerformerBot.py -m manual -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update - Manually checked" -i manualcheck_output.csv`
+Manual mode : `python .\StashBox-PerformerBot.py manual -tsb PMVSTASH -ssb STASHDB -s http://localhost:9999/ -c "[PBOT] StashDB Update - Manually checked" -i manualcheck_output.csv`
 
 ---
 

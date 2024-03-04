@@ -96,9 +96,13 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
                 newImgs = perfManager.uploadPerformerImages(exclude=performer.get("images", []))
                 updateInput["image_ids"] = newImgs
 
-
-                perfManager.submitPerformerUpdate(performer["id"], updateInput, comment)
-                return ReturnCode.SUCCESS
+                try:
+                    perfManager.submitPerformerUpdate(performer["id"], updateInput, comment)
+                    return ReturnCode.SUCCESS
+                except Exception as e:
+                    print("Error updating performer")
+                    print(e)
+                    return ReturnCode.ERROR
             else:
                 return ReturnCode.NO_NEED
         
@@ -213,7 +217,7 @@ if __name__ == '__main__':
         Update mode : lists all Performers on TARGET that have a link to SOURCE, and updates them to mirror changes in SOURCE\n
         Manual mode: takes an input CSV file to force update performers, even if they would not be updated through Update mode (unless is has a Draft already)
         """,
-        epilog="__StashBox_Perf_Mgr_v0.4__"
+        epilog="__StashBox_Perf_Mgr_v0.9__"
     )
     subparsers = parser.add_subparsers()
 
