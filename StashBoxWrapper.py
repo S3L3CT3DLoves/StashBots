@@ -72,7 +72,7 @@ def handleGQLResponse(response):
             print(f"Error in Stash call: {response.status_code}" )
     except Exception as e:
         print("Other error")
-        raise
+        raise e
 
 def getImgB64(url):
     return base64.b64encode(requests.get(url).content)
@@ -173,7 +173,7 @@ def getAllPerformers(sourceEndpoint : Dict, callback = None):
         print(f"GetAllPerformers page {query['page']} of {pages}")
 
         # Avoid overloading the server
-        time.sleep(5)
+        time.sleep(2)
         response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
         returnData.extend(response["performers"])
         if callback != None:
@@ -527,6 +527,7 @@ class StashBoxPerformerManager:
 
         draftCreate["urls"] = performer.get("urls",[])
         draftCreate["urls"] = list(filter(lambda url: url is not None, map(lambda url: self.siteMapper.mapUrlToEdit(url, self.source, self.destination), draftCreate["urls"])))
+        draftCreate["urls"] = list(filter(lambda url: url["site_id"] != "" and url["url"] != "", draftCreate["urls"]))
 
         return draftCreate
     
@@ -693,6 +694,11 @@ class StashBoxPerformerHistory:
         firstState.pop('merged_ids')
         allEdits.reverse()
 
+        # Init arrays if they are "None"
+        for attr in ["aliases", "tattoos", "piercings", "images", "urls"]:
+            if firstState[attr] == None:
+                firstState[attr] = []
+
         for edit in allEdits:
             if edit["details"] == None:
                 # Some Edits don't have any changes except a MERGE action
@@ -765,14 +771,14 @@ class StashBoxPerformerHistory:
             if compareValue != localValue:
                 if len(compareValue) != len(localValue):
                     # One of the dates is a short date, the other is not
-                    dateChecker = "^(\\d{4})-01-01"
+                    dateChecker = r"^(\d{4})-01-01"
                     if len(compareValue) == 4:
-                        localCheck = re.match(dateChecker, localValue)
-                        if compareValue != localCheck.group(1):
+                        check = re.match(dateChecker, localValue)
+                        if check and compareValue != check.group(1):
                             returnCodes.append(ComparisonReturnCode.birth_date)
                     elif len(localValue) == 4:
                         check = re.match(dateChecker, compareValue)
-                        if localValue != check.group(1):
+                        if check and localValue != check.group(1):
                             returnCodes.append(ComparisonReturnCode.birth_date)
                 else:
                     returnCodes.append(ComparisonReturnCode.birth_date)
@@ -873,7 +879,7 @@ class StashBoxPerformerHistory:
             for x in editChanges['details'].get("removed_images"):
                     if x == None:
                         continue
-                    existingImg = [img for img in newState["images"] if img["id"] == x["id"]][0]
+                    existingImg = [img for img in newState["images"] if img and img["id"] == x["id"]][0]
                     newState["images"].remove(existingImg)
         
         return newState
@@ -930,6 +936,7 @@ class StashBoxCacheManager:
                 perf["id"] = edit["target"]["id"]
                 perf["updated"] = edit["closed"]
                 perf["created"] = edit["target"]["created"]
+                perf["deleted"] = False
                 self.cache.performers.append(perf)
             elif edit["operation"] == "DESTROY":
                 self.cache.deletePerformerById(targetPerformerId)

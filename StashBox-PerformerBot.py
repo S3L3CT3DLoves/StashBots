@@ -59,7 +59,7 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
 
     try:
         sourcePerformerHistory = StashBoxPerformerHistory(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url']), sourceId, cache, siteMapper)
-    except:
+    except Exception as e:
         print(f"{performer['name']} --- Error while processing --- !!!")
         return ReturnCode.ERROR
     perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache)
@@ -141,9 +141,14 @@ def manualUpdatePerformer(source : StashSource, destination : StashSource, perfo
     draft["urls"] = concatUrls
     
 
-    newImgs = sourcePerf.uploadPerformerImages(exclude=performer.get("images", []))
-    draft["image_ids"] = newImgs
-    sourcePerf.submitPerformerUpdate(performer["id"], draft, comment, False)
+    try:
+        newImgs = sourcePerf.uploadPerformerImages(exclude=performer.get("images", []))
+        draft["image_ids"] = newImgs
+        sourcePerf.submitPerformerUpdate(performer["id"], draft, comment, False)
+    except Exception as e:
+        print("Error processing performer")
+        print(e)
+    
 
     print(f"{performer['name']} updated")
 
@@ -178,7 +183,7 @@ def getPerformerUploadsFromStash(source : StashSource, destination : StashSource
     ))
     return TO_UPLOAD
 
-def filterPerformersForUpdate(performersList : List[t.Performer], source : StashSource, target : StashSource) -> List[t.Performer]:
+def filterPerformersForUpdate(performersList : List[t.Performer], source : StashSource, target : StashSource, verbose = False) -> List[t.Performer]:
     newList = []
     openEdits = getOpenEdits(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[target]['url']))
     performersWithOpenEdits = list(map(
@@ -188,8 +193,15 @@ def filterPerformersForUpdate(performersList : List[t.Performer], source : Stash
             openEdits
         )
     ))
+    multiLink = 0
+    haveLink = 0
+    skipEdit = 0
     for performer in performersList:
         if performer.get("urls"):
+            if performer["deleted"]:
+                # Performer is deleted, skip
+                continue
+
             if performer["id"] in performersWithOpenEdits:
                 # Performer has an open Edit, skip
                 continue
@@ -197,13 +209,19 @@ def filterPerformersForUpdate(performersList : List[t.Performer], source : Stash
             if [url for url in performer['urls'] if siteMapper.isStashBoxLink(url['url'], source)] == []:
                 # Performer has no link to source
                 continue
+            haveLink += 1
             
             if siteMapper.countStashBoxLinks([url["url"] for url in performer["urls"]]) != 1:
                 # Performer has more than one StashBox link, for now this is not supported
+                multiLink += 1
                 continue
 
             newList.append(performer)
 
+    if verbose:
+        print(f"There are {haveLink} performers with Links to {source.name}")
+        print(f"Skipping {multiLink} performers due to multiple StashBox Links")
+        print(f"Filtered : {len(newList)}")
     return newList
 
 
@@ -226,18 +244,18 @@ if __name__ == '__main__':
     generalParser.add_argument("-c", "--comment", help="Comment for StashBox Edits", default="[BOT] StashBox-PerformerBot Edit")
     generalParser.add_argument("-tsb", "--target-stashbox", help="Target StashBox instance", choices=['STASHDB', 'PMVSTASH', "FANSDB"], required=True)
     generalParser.add_argument("-ssb", "--source-stashbox", help="Source StashBox instance", choices=['STASHDB', 'PMVSTASH', "FANSDB"], required=True)
-    generalParser.add_argument("-sc", "--source-cache", help="Use a local cache for Source StashBox", action="store_true")
 
     createParser = subparsers.add_parser("create", parents=[generalParser], help="")
 
     updateParser = subparsers.add_parser("update", parents=[generalParser], help="")
     updateParser.add_argument("-o", "--output", help="Output file to list not-updated performers", type=argparse.FileType('w+', encoding='UTF-8'))
     updateParser.add_argument("-l", "--limit", help="Maximum number of edits allowed", type=int, default=100000)
+    updateParser.add_argument("-sc", "--source-cache", help="Use a local cache for Source StashBox", action="store_true")
 
     manualParser = subparsers.add_parser("manual", parents=[generalParser], help="")
     manualParser.add_argument("-i", "--input-file", help="Input csv file containing the performers to be updated", type=argparse.FileType('r', encoding='UTF-8'))
 
-    testParser = subparsers.add_parser("test")
+    testParser = subparsers.add_parser("test", parents=[generalParser], help="")
 
     argv = sys.argv
     argv.pop(0)
@@ -263,7 +281,6 @@ if __name__ == '__main__':
     siteMapper.SOURCE = SOURCE
     siteMapper.DESTINATION = TARGET
 
-    sourceCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url']), SOURCE, True) if args.source_cache else None
     targetCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']), TARGET, True)
 
     count = 0
@@ -275,6 +292,7 @@ if __name__ == '__main__':
 
         print("Using local cache for TARGET (always on)")
         targetCacheMgr.loadCache(True, 24, 7)
+        sourceCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url']), SOURCE, True) if args.source_cache else None
         if sourceCacheMgr != None:
             print("Using local cache for SOURCE")
             sourceCacheMgr.loadCache(True, 24, 7)
@@ -310,7 +328,7 @@ if __name__ == '__main__':
 
     elif sys.argv[0].lower() == "create":
         print("Creation mode")
-        createPerformers(SOURCE, TARGET, getPerformerUploadsFromStash(SOURCE, TARGET), args.comment, cache=sourceCacheMgr.cache if sourceCacheMgr != None else None)
+        createPerformers(SOURCE, TARGET, getPerformerUploadsFromStash(SOURCE, TARGET), args.comment)
 
     elif sys.argv[0].lower() == "manual":
         print("Manual Update mode")
@@ -327,7 +345,7 @@ if __name__ == '__main__':
             )
         ))
         for perf in updateList:
-            if perf['force'].lower() == "true":
+            if perf["force"] != None and perf['force'].lower() == "true":
                 performerGetter = StashBoxPerformerManager(stash, TARGET, TARGET, siteMapper)
                 performerGetter.getPerformer(perf['targetId'])
                 if not perf["targetId"] in performersWithOpenEdits:
