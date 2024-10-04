@@ -6,7 +6,7 @@ import time
 from typing import List
 from requests import get
 from StashBoxCache import StashBoxCache
-from StashBoxHelperClasses import PerformerUploadConfig, StashSource
+from StashBoxHelperClasses import PerformerUploadConfig, StashSource, normalize_url
 import schema_types as t
 from StashBoxWrapper import ComparisonReturnCode, StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, getOpenEdits, stashDateToDateTime, getImgB64, StashBoxCacheManager, comparePerformers
 from stashapi.stashapp import StashInterface
@@ -64,7 +64,7 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
     except Exception as e:
         print(f"{performer['name']} --- Error while processing --- !!!")
         return ReturnCode.ERROR
-    perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache)
+    perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache, sitesMapper=siteMapper)
     perfManager.setPerformer(sourcePerformerHistory.performer)
 
     #Bugfix for non-iso country names
@@ -85,9 +85,10 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
 
                 # Keep existing links to avoid removing data (need to map to string to dedup)
                 concatUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
-                justExistingLinks = list(map(lambda x: x["url"]), performer["urls"])
+                justExistingLinks = list(map(lambda x: normalize_url(x["url"]), performer["urls"]))
                 for urlData in updateInput["urls"]:
-                    if urlData["url"] not in justExistingLinks:
+                    normUrl = normalize_url(urlData["url"])
+                    if normUrl not in justExistingLinks:
                         concatUrls.append(urlData)
 
                 #For some reason, sometimes there are empty URLs, so filter them out
