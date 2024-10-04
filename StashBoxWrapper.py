@@ -111,7 +111,7 @@ def callGraphQL(stashBoxEndpoint, query, variables={}):
     
     return handleGQLResponse(response)
 
-def upload_image(destinationEndpoint, image_in, exclude = {}):
+def upload_image(destinationEndpoint, image_in, existing = {}, excluded = {}):
     if re.search(r';base64',image_in):
         m = re.search(r'data:(?P<mime>.+?);base64,(?P<img_data>.+)',image_in)
         mime = m.group("mime")
@@ -126,9 +126,13 @@ def upload_image(destinationEndpoint, image_in, exclude = {}):
     if not b64img_bytes:
         raise Exception("upload_image requires a base64 string or url")
     
-    if b64img_bytes in exclude.keys():
+    if b64img_bytes in excluded.keys():
+        print("Skipping image, removed")
+        return
+
+    if b64img_bytes in existing.keys():
         print("Skipping image, already existing")
-        return {"id" : exclude[b64img_bytes]}
+        return
     
     body, multipart_header = encode_multipart_formdata({
         'operations':'{"operationName":"AddImage","variables":{"imageData":{"file":null}},"query":"mutation AddImage($imageData: ImageCreateInput!) {imageCreate(input: $imageData) {id url}}"}',
@@ -317,7 +321,7 @@ class StashBoxSitesMapper:
         if destinationId is None and self.SOURCE_INFOS[self.DESTINATION]["default_performer_link"] is not None:
             # If there is a default link type, use it when the link doesn't match anything else
             destinationId = self.SOURCE_INFOS[self.DESTINATION]["default_performer_link"]
-            
+
         if destinationId is not None:
             return {
                     "url" : url["url"],
@@ -576,7 +580,7 @@ class StashBoxPerformerManager:
 
         return draftCreate
     
-    def uploadPerformerImages(self, performer : t.Performer = None, exclude : List[str] = []) -> List[str]:
+    def uploadPerformerImages(self, performer : t.Performer = None, existing : List[str] = [t.Image], removed : List[t.Image] = []) -> List[str]:
         """
         Uploads the images stored in performer['images'] to the destination StashBox instance
 
@@ -584,22 +588,33 @@ class StashBoxPerformerManager:
 
         ### Parameters
             - performer (t.Performer, optional): The performer that should be converted. (default: the stored performer)
-            - exclude ([str], optional): List of already uploaded images as base64, to avoid reuploading them
+            - existing ([t.Image], optional): List of already uploaded images, to keep all existing
+            - existing ([t.Image], optional): List of images that were removed from the source, to remove them too
         """
         if performer == None:
             performer = self.performer
 
         imageIds = []
         counter = 0
-        allImgs = performer.get("images", [])
+        sourceImgs = performer.get("images", [])
+        
         print("Loading existing images")
         existingImgs = {}
-        for img in exclude:
+        for img in existing:
             existingImgs[getImgB64(img["url"])] = img["id"]
+        
+        removedImgs = {}
+        for img in removed:
+            removedImgs[getImgB64(img["url"])] = img["id"]
 
-        for image in allImgs:
+        # Start with existing images
+        for imgB64, id in existingImgs.items():
+            if imgB64 not in removedImgs.keys():
+                imageIds.append(id)
+
+        for image in sourceImgs:
             counter +=1
-            print(f"Uploading image {counter} of {len(allImgs)}")
+            print(f"Uploading image {counter} of {len(sourceImgs)}")
             imageId = upload_image(self.destinationEndpoint, image['url'], existingImgs)
             if imageId:
                 imageIds.append(imageId["id"])
@@ -664,6 +679,7 @@ class StashBoxPerformerHistory:
     performerStates : List[t.Performer]
     cache : StashBoxCache
     siteMapper : StashBoxSitesMapper
+    removedImages : List[t.Image]
 
     def __init__(self, stashBoxEndpoint : Dict, performerId : str, cache : StashBoxCache = None, siteMapper : StashBoxSitesMapper = None) -> None:
         self.endpoint = stashBoxEndpoint
@@ -671,6 +687,7 @@ class StashBoxPerformerHistory:
         self.performerStates = {}
         self.cache = cache
         self.siteMapper = siteMapper if siteMapper != None else StashBoxSitesMapper()
+        self.removedImages = []
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
@@ -706,6 +723,14 @@ class StashBoxPerformerHistory:
                 if self._checkStateChange(state):
                     prevState = StashBoxPerformerHistory.applyPerformerUpdate(prevState,state)
                     self.performerStates[stashDateToDateTime(state['closed'])] = prevState
+            
+
+            # Grab list of images which have been removed from the performer
+            for state in self.performerEdits:
+                if self._checkStateChange(state):
+                    removedImagesAtState = state['details'].get("removed_images")
+                    if removedImagesAtState is not None:
+                        self.removedImages.extend(removedImagesAtState)
         
         return
 

@@ -63,6 +63,7 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
         sourcePerformerHistory = StashBoxPerformerHistory(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url']), sourceId, cache, siteMapper)
     except Exception as e:
         print(f"{performer['name']} --- Error while processing --- !!!")
+        print(f"{performer['name']},{performer['id']},{sourceId},ERROR,False", file=outputFileStream)
         return ReturnCode.ERROR
     perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache, sitesMapper=siteMapper)
     perfManager.setPerformer(sourcePerformerHistory.performer)
@@ -83,7 +84,7 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
 
                 updateInput = perfManager.asPerformerEditDetailsInput()
 
-                # Keep existing links to avoid removing data (need to map to string to dedup)
+                # Keep existing links to avoid removing data
                 concatUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
                 justExistingLinks = list(map(lambda x: normalize_url(x["url"]), performer["urls"]))
                 for urlData in updateInput["urls"]:
@@ -99,7 +100,7 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
                 updateInput["urls"] = concatUrls
 
                 print("Uploading new images")
-                newImgs = perfManager.uploadPerformerImages(exclude=performer.get("images", []))
+                newImgs = perfManager.uploadPerformerImages(existing=performer.get("images", []), removed=sourcePerformerHistory.removedImages)
                 updateInput["image_ids"] = newImgs
 
                 try:
