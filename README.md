@@ -10,11 +10,6 @@ You must have a (running) Stash instance, with working credentials for the Stash
 
 You must have BOT rights on TARGET
 
-## Currently supported
-PMVSTASH and STASHDB are currently implemented, FANSDB will be added soon
-
-*Using STASHDB as a TARGET is not recommended, because it does not have a link type for PMVSTASH, which will prevent updating in the future.*
-
 ## Terms Used
 - TARGET (-tsb) : StashBox instance where the performers will be created / updated
 - SOURCE (-ssb) : StashBox instance where the performer data will be copied from (generally STASHDB)
@@ -56,6 +51,17 @@ For all lines in the file where the last element is True, it will force the upda
 This must only be used after a manual review of the list of performers has been done, to ensure no import data will be overwritten.
 
 Because this operation can be destructive, it will not be send in BOT mode, and will show up a normal Edit in StashBox.
+
+
+## Stats Mode
+In Stats mode, the Bot will identify the number of performers that have No Links (at all), and how many have links to other StashBox instances.
+
+## Links Mode
+In Links mode, the Bot will compare the performer information in the TARGET with other StashBox instances, and add the link to the source if it exists.
+
+This can be used to add StashDB links to performers that were scrapped from there, but the link to the source was not added.
+
+*Support for FansDB is coming.*
 
 # StashBox Cache
 The bot features a full caching feature, to keep a local copy of all performers in a StashBox instance.

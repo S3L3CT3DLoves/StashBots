@@ -2,13 +2,15 @@ import csv
 from datetime import datetime
 from enum import Enum
 import json, re, sys, argparse
+import time
 from typing import List
 from requests import get
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource
 import schema_types as t
-from StashBoxWrapper import ComparisonReturnCode, StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, getOpenEdits, stashDateToDateTime, getImgB64, StashBoxCacheManager
+from StashBoxWrapper import ComparisonReturnCode, StashBoxFilterManager, StashBoxPerformerHistory, StashBoxSitesMapper, StashBoxPerformerManager, convertCountry, getAllEdits, getAllPerformers, getOpenEdits, stashDateToDateTime, getImgB64, StashBoxCacheManager, comparePerformers
 from stashapi.stashapp import StashInterface
+from stashapi.stashbox  import StashBoxInterface
 
 
 siteMapper = StashBoxSitesMapper()
@@ -82,10 +84,13 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
                 updateInput = perfManager.asPerformerEditDetailsInput()
 
                 # Keep existing links to avoid removing data (need to map to string to dedup)
-                existingUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
-                concatUrls = [json.dumps(data, sort_keys=True) for data in existingUrls + updateInput["urls"]]
-                concatUrls = list(set(concatUrls))
-                concatUrls = [json.loads(data) for data in concatUrls]
+                concatUrls = list(map(lambda x: {'site_id':x["site"]["id"], "url": x["url"]}, performer["urls"]))
+                justExistingLinks = list(map(lambda x: x["url"]), performer["urls"])
+                for urlData in updateInput["urls"]:
+                    if urlData["url"] not in justExistingLinks:
+                        concatUrls.append(urlData)
+
+                #For some reason, sometimes there are empty URLs, so filter them out
                 concatUrls = list(filter(
                     lambda url : url != {},
                     concatUrls
@@ -152,6 +157,43 @@ def manualUpdatePerformer(source : StashSource, destination : StashSource, perfo
 
     print(f"{performer['name']} updated")
 
+def addStashBoxLinkPerformer(source : StashSource, destination : StashSource, performer : t.Performer, sourceId : str, comment : str):
+    """
+    ### Summary
+    Add a StashBox link to an existing performer
+    """
+
+    print(f"Ready to update {performer['name']}")
+    
+    perfManager = StashBoxPerformerManager(stash, source, destination)
+    perfManager.setPerformer(performer)
+    draft = perfManager.asPerformerEditDetailsInput()
+
+
+    # Keep existing links to avoid removing data
+    existingUrls = list(map(lambda x:{
+        'site_id': x["site"]["id"] if "site" in x else x["site_id"],
+        "url": x["url"]
+        }, draft["urls"]))
+
+    # Add url
+    existingUrls.append({
+                "url" : f"{siteMapper.SOURCE_INFOS[source]['url']}performers/{sourceId}",
+                "site_id" : siteMapper.SOURCE_INFOS[destination]['siteIds'][source]
+            })
+
+    draft["urls"] = existingUrls
+    
+
+    try:
+        perfManager.submitPerformerUpdate(performer["id"], draft, comment, False)
+    except Exception as e:
+        print("Error processing performer")
+        print(e)
+    
+
+    print(f"{performer['name']} updated")
+
 def getPerformerUploadsFromStash(source : StashSource, destination : StashSource) -> List[PerformerUploadConfig]:
     sourceEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[source]['url']}graphql"
     destinationEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[destination]['url']}graphql"
@@ -204,14 +246,20 @@ def filterPerformersForUpdate(performersList : List[t.Performer], source : Stash
 
             if performer["id"] in performersWithOpenEdits:
                 # Performer has an open Edit, skip
+                skipEdit += 1
                 continue
 
-            if [url for url in performer['urls'] if siteMapper.isStashBoxLink(url['url'], source)] == []:
+            if [url for url in performer['urls'] if siteMapper.isTargetStashBoxLink(url['url'], source)] == []:
                 # Performer has no link to source
                 continue
             haveLink += 1
-            
-            if siteMapper.countStashBoxLinks([url["url"] for url in performer["urls"]]) != 1:
+
+            counter = 0
+            for url in [url["url"] for url in performer["urls"]]:
+                if siteMapper.whichStashBoxLink(url) != None:
+                    counter += 1
+
+            if counter > 1:
                 # Performer has more than one StashBox link, for now this is not supported
                 multiLink += 1
                 continue
@@ -221,6 +269,7 @@ def filterPerformersForUpdate(performersList : List[t.Performer], source : Stash
     if verbose:
         print(f"There are {haveLink} performers with Links to {source.name}")
         print(f"Skipping {multiLink} performers due to multiple StashBox Links")
+        print(f"Skipping {skipEdit} performers ongoing edits")
         print(f"Filtered : {len(newList)}")
     return newList
 
@@ -235,7 +284,7 @@ if __name__ == '__main__':
         Update mode : lists all Performers on TARGET that have a link to SOURCE, and updates them to mirror changes in SOURCE\n
         Manual mode: takes an input CSV file to force update performers, even if they would not be updated through Update mode (unless is has a Draft already)
         """,
-        epilog="__StashBox_Perf_Mgr_v0.9__"
+        epilog="__StashBox_Perf_Mgr_v1.1__"
     )
     subparsers = parser.add_subparsers()
 
@@ -255,7 +304,12 @@ if __name__ == '__main__':
     manualParser = subparsers.add_parser("manual", parents=[generalParser], help="")
     manualParser.add_argument("-i", "--input-file", help="Input csv file containing the performers to be updated", type=argparse.FileType('r', encoding='UTF-8'))
 
-    testParser = subparsers.add_parser("test", parents=[generalParser], help="")
+    statsParser = subparsers.add_parser("stats", parents=[generalParser], help="")
+
+    linksParser = subparsers.add_parser("links", parents=[generalParser], help="")
+    linksParser.add_argument("-l", "--limit", help="Maximum number of edits allowed", type=int, default=10)
+    linksParser.add_argument("-m", "--mode", help="Mode", choices=['NOLINKS', 'NOSTASHBOX', "NOFANSDB"], default="NOLINKS")
+    linksParser.add_argument("-e", "--exact", help="Only use exact matches", action="store_true")
 
     argv = sys.argv
     argv.pop(0)
@@ -280,6 +334,7 @@ if __name__ == '__main__':
     TARGET = StashSource[args.target_stashbox]
     siteMapper.SOURCE = SOURCE
     siteMapper.DESTINATION = TARGET
+    siteMapper.getSitesFromDestinationServer(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']))
 
     targetCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']), TARGET, True)
 
@@ -358,6 +413,136 @@ if __name__ == '__main__':
 
         args.input_file.close()
     
-    elif sys.argv[0].lower() == "test":
-        ip = get('https://api.ipify.org').content.decode('utf8')
-        print('My public IP address is: {}'.format(ip))
+    elif sys.argv[0].lower() == "stats":
+        performersList = []
+
+        print("Using local cache for TARGET (always on)")
+        targetCacheMgr.loadCache(True, 1, 2)
+
+        print("Parsing list of performers to update")
+        performersList = filterPerformersForUpdate(targetCacheMgr.cache.getCache(), SOURCE, TARGET, True)
+        print(f"There are {len(performersList)} to review")
+
+        multiLink = []
+        otherStashBox = []
+        noLinks = []
+        noStashBox = []
+        for performer in targetCacheMgr.cache.getCache():
+            if performer.get("urls"):
+                if performer["deleted"]:
+                    # Performer is deleted, skip
+                    continue
+                
+                stashBoxUrls = [url for url in performer['urls'] if siteMapper.whichStashBoxLink(url["url"]) != None]
+                if stashBoxUrls != []:
+                    if len(stashBoxUrls) > 1:
+                        multiLink.append({"id" : performer.get("id"), "name" : performer.get("name")})
+                    elif len(stashBoxUrls) == 1 and siteMapper.whichStashBoxLink(stashBoxUrls[0]["url"]) != TARGET:
+                        otherStashBox.append({"id" : performer.get("id"), "name" : performer.get("name")})
+                else:
+                    noStashBox.append({"id" : performer.get("id"), "name" : performer.get("name")})
+            else:
+                noLinks.append({"id" : performer.get("id"), "name" : performer.get("name")})
+        
+        print(f"There are {len(multiLink)} performers with multiple links")
+        print(f"There are {len(otherStashBox)} performers with a link to a single other StashBox")
+        print(f"There are {len(noStashBox)} performers with no StashBox links")
+        print(f"There are {len(noLinks)} performers with no links at all")
+
+        with open("stats-nolinks.json", mode='w') as file:
+            json.dump(noLinks, file)
+        with open("stats-multilinks.json", mode='w') as file:
+            json.dump(multiLink, file)
+        with open("stats-noSB.json", mode='w') as file:
+            json.dump(noStashBox, file)
+ 
+    elif sys.argv[0].lower() == "links":
+        targetCacheMgr.loadCache(True, 12, 2)
+        sourceCacheMgr = StashBoxCacheManager(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[SOURCE]['url']), SOURCE, True)
+        sourceCacheMgr.loadCache(True, 48, 7)
+
+        openEdits = getOpenEdits(stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[TARGET]['url']))
+        performersWithOpenEdits = list(map(
+            lambda edit : edit["target"]["id"],
+            filter(
+                lambda edit : edit["operation"] in ["MODIFY", "DESTROY"],
+                openEdits
+            )
+        ))
+
+        noLinks = []
+        noStashBox = []
+        for performer in targetCacheMgr.cache.getCache():
+            if performer["id"] in performersWithOpenEdits:
+                # Don't edit performers with ongoing changes, to avoid conflicts
+                continue 
+            if performer.get("urls"):
+                if performer["deleted"]:
+                    # Performer is deleted, skip
+                    continue
+                
+                stashBoxUrls = [url for url in performer['urls'] if siteMapper.whichStashBoxLink(url["url"]) != None]
+                if stashBoxUrls != []:
+                    continue
+                else:
+                    noStashBox.append(performer)
+            else:
+                noLinks.append(performer)
+        
+        matches = []
+        partialMatches = []
+
+        print(f"There are {len(sourceCacheMgr.cache.getCache())} performers in the source")
+        i = 0
+        start = time.time()
+        print(f"Mode = {args.mode} // Limit = {args.limit} // Exact = {args.exact}")
+        if args.mode == "NOLINKS":
+            print(f"There are {len(noLinks)} performers with no links in the target")
+        elif args.mode == "NOSTASHBOX":
+            print(f"There are {len(noStashBox)} performers with no links to the source in the target")
+        
+        for performerA in sourceCacheMgr.cache.getCache():
+            if len(partialMatches) >= args.limit or len(matches) >= args.limit:
+                break
+            if i%1000 == 0:
+                print(f"Searching... {i / len(sourceCacheMgr.cache.getCache()):.2%} in {time.time()-start:.2f}s")
+            
+            if args.mode == "NOSTASHBOX":
+                for performerB in noStashBox:
+                    if performerB.get("name").lower() == performerA.get("name").lower():
+                        comp = comparePerformers(performerA, performerB)
+                        if comp == [ComparisonReturnCode.IDENTICAL]:
+                            print(f"Found {performerB["name"]} in noStashBox")
+                            matches.append((performerA.get("id"), performerB.get("id")))
+
+                        elif not args.exact and not ComparisonReturnCode.name in comp:
+                            partialMatches.append((performerA.get("id"), performerB.get("id")))
+                    else:
+                        #for now only extact matches are supported
+                        continue
+
+            elif args.mode == "NOFANSDB":
+                print("Not supported yet")
+                sys.exit(0)
+
+            elif args.mode == "NOLINKS":
+                for performerB in noLinks:
+                    if performerB.get("name").lower() == performerA.get("name").lower():
+                        comp = comparePerformers(performerA, performerB)
+                        if comp == [ComparisonReturnCode.IDENTICAL]:
+                            print(f"Found {performerB["name"]} in noLinks")
+                            matches.append((performerA.get("id"), performerB.get("id")))
+                        elif not args.exact and not ComparisonReturnCode.name in comp:
+                            partialMatches.append((performerA.get("id"), performerB.get("id")))
+                    else:
+                        #for now only extact matches are supported
+                        continue
+            i = i + 1
+        
+        if len(matches) > 0 or len(partialMatches) > 0:
+            uploaded = 0
+            if uploaded < args.limit:
+                for sourcePerf, targetPerf in matches:
+                    addStashBoxLinkPerformer(StashSource.STASHDB, StashSource.PMVSTASH,targetCacheMgr.cache.getPerformerById(targetPerf),sourcePerf, "Add StashDB Link")
+                    uploaded = uploaded + 1
+            sys.exit(0)
