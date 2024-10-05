@@ -245,11 +245,11 @@ def getOpenEdits(endpoint : Dict):
 
 def comparePerformers(performerA : t.Performer, performerB : t.Performer):
     returnCodes = []
-    for attr in ["name","gender","ethnicity","country","hair_color"]:
+    for attr in ["name","gender","ethnicity","country","hair_color", "eye_color", "height", "breast_type", "disambiguation"]:
         valueA = performerA.get(attr)
         valueB = performerB.get(attr)
         if valueA and valueB:
-            if valueA.lower() != valueB.lower():
+            if (isinstance(valueA, str) and valueA.lower() != valueB.lower()) and valueA != valueB:
                 # Values are different
                 returnCodes.append(ComparisonReturnCode[attr])
         elif valueA or valueB:

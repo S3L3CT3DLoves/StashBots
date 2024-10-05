@@ -5,6 +5,7 @@ import json, re, sys, argparse
 import time
 from typing import List
 from requests import get
+from tabulate import tabulate
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource, normalize_url
 import schema_types as t
@@ -149,8 +150,9 @@ def manualUpdatePerformer(source : StashSource, destination : StashSource, perfo
     
 
     try:
-        newImgs = sourcePerf.uploadPerformerImages(exclude=performer.get("images", []))
-        draft["image_ids"] = newImgs
+        existingImgs = list(map(lambda x: x["id"],performer.get("images")))
+        newImgs = sourcePerf.uploadPerformerImages(existing=performer.get("images", []))
+        draft["image_ids"] = existingImgs + newImgs
         sourcePerf.submitPerformerUpdate(performer["id"], draft, comment, False)
     except Exception as e:
         print("Error processing performer")
@@ -167,7 +169,7 @@ def addStashBoxLinkPerformer(source : StashSource, destination : StashSource, pe
 
     print(f"Ready to update {performer['name']}")
     
-    perfManager = StashBoxPerformerManager(stash, source, destination)
+    perfManager = StashBoxPerformerManager(stash, source, destination, siteMapper)
     perfManager.setPerformer(performer)
     draft = perfManager.asPerformerEditDetailsInput()
 
@@ -275,7 +277,20 @@ def filterPerformersForUpdate(performersList : List[t.Performer], source : Stash
         print(f"Filtered : {len(newList)}")
     return newList
 
+def userCheckPerformerComparison(targetPerformer, sourcePerformer):
+    comparison = sourcePerformer.compareAtDateTime(datetime.now(), targetPerformer.performer)
+    print(comparison)
 
+    comparisonTable = []
+    for attr in "name","gender","ethnicity","country":
+        comparisonTable.append([attr, targetPerformer.performer.get(attr), sourcePerformer.performer.get(attr)])
+
+    comparisonTable.append(["Birthdate", targetPerformer.performer.get("birth_date", targetPerformer.performer.get("birthdate")),sourcePerformer.performer.get("birth_date", sourcePerformer.performer.get("birthdate"))])
+    
+    for attr in "aliases", "disambiguation","breast_type","cup_size","band_size","waist_size", "eye_color","hair_color","height","hip_size","career_start_year","career_end_year":
+        comparisonTable.append([attr, targetPerformer.performer.get(attr), sourcePerformer.performer.get(attr)])
+    
+    print(tabulate(comparisonTable, headers=['Attr', 'PMVStash', 'StashDB']))
 
 
 if __name__ == '__main__':
@@ -284,9 +299,11 @@ if __name__ == '__main__':
         description="""CLI tool to allow management of StashBox performers\n
         Creation mode : lists Performers from your local Stash instance which have a link to SOURCE but not to TARGET, and creates the performer in TARGET\n
         Update mode : lists all Performers on TARGET that have a link to SOURCE, and updates them to mirror changes in SOURCE\n
-        Manual mode: takes an input CSV file to force update performers, even if they would not be updated through Update mode (unless is has a Draft already)
+        Manual mode: takes an input CSV file to force update performers, even if they would not be updated through Update mode (unless is has a Draft already)\n
+        Stats mode: returns information about performers and their links to other StashBoxes\n
+        Links mode: automates adding links to performers that were scraped from a StashBox but don't have a link
         """,
-        epilog="__StashBox_Perf_Mgr_v1.1__"
+        epilog="__StashBox_Perf_Mgr_v1.2__"
     )
     subparsers = parser.add_subparsers()
 
@@ -312,6 +329,7 @@ if __name__ == '__main__':
     linksParser.add_argument("-l", "--limit", help="Maximum number of edits allowed", type=int, default=10)
     linksParser.add_argument("-m", "--mode", help="Mode", choices=['NOLINKS', 'NOSTASHBOX', "NOFANSDB"], default="NOLINKS")
     linksParser.add_argument("-e", "--exact", help="Only use exact matches", action="store_true")
+    linksParser.add_argument("-sk", "--skip", help="Skip X% of the DB", type=int, default=0)
 
     argv = sys.argv
     argv.pop(0)
@@ -497,7 +515,7 @@ if __name__ == '__main__':
         print(f"There are {len(sourceCacheMgr.cache.getCache())} performers in the source")
         i = 0
         start = time.time()
-        print(f"Mode = {args.mode} // Limit = {args.limit} // Exact = {args.exact}")
+        print(f"Mode = {args.mode} // Limit = {args.limit} (Skip {args.skip}%%) // Exact = {args.exact}")
         if args.mode == "NOLINKS":
             print(f"There are {len(noLinks)} performers with no links in the target")
         elif args.mode == "NOSTASHBOX":
@@ -509,6 +527,11 @@ if __name__ == '__main__':
             if i%1000 == 0:
                 print(f"Searching... {i / len(sourceCacheMgr.cache.getCache()):.2%} in {time.time()-start:.2f}s")
             
+            if i*100 / len(sourceCacheMgr.cache.getCache()) < args.skip:
+                # Skip X% of the DB, to save time when using a low limit and calling the function several times
+                i = i +1
+                continue
+
             if args.mode == "NOSTASHBOX":
                 for performerB in noStashBox:
                     if performerB.get("name").lower() == performerA.get("name").lower():
@@ -518,6 +541,7 @@ if __name__ == '__main__':
                             matches.append((performerA.get("id"), performerB.get("id")))
 
                         elif not args.exact and not ComparisonReturnCode.name in comp:
+                            userCheckPerformerComparison(performerB, performerA)
                             partialMatches.append((performerA.get("id"), performerB.get("id")))
                     else:
                         #for now only extact matches are supported
@@ -545,6 +569,9 @@ if __name__ == '__main__':
             uploaded = 0
             if uploaded < args.limit:
                 for sourcePerf, targetPerf in matches:
+                    addStashBoxLinkPerformer(StashSource.STASHDB, StashSource.PMVSTASH,targetCacheMgr.cache.getPerformerById(targetPerf),sourcePerf, "Add StashDB Link")
+                    uploaded = uploaded + 1
+                for sourcePerf, targetPerf in partialMatches:
                     addStashBoxLinkPerformer(StashSource.STASHDB, StashSource.PMVSTASH,targetCacheMgr.cache.getPerformerById(targetPerf),sourcePerf, "Add StashDB Link")
                     uploaded = uploaded + 1
             sys.exit(0)
