@@ -521,6 +521,8 @@ if __name__ == '__main__':
             print(f"There are {len(noStashBox)} performers with no links to the source in the target")
         
         for performerA in sourceCacheMgr.cache.getCache():
+            if len(partialMatches) >= args.limit or len(matches) >= args.limit:
+                break
             if i%1000 == 0:
                 print(f"Searching... {i / len(sourceCacheMgr.cache.getCache()):.2%} in {time.time()-start:.2f}s")
             
@@ -562,9 +564,6 @@ if __name__ == '__main__':
                         continue
             i = i + 1
         
-        print(f"There are {len(matches)} exact matches")
-        print(f"There are {len(partialMatches)} partial matches")
-        sys.exit(0)
         if len(matches) > 0 or len(partialMatches) > 0:
             uploaded = 0
             if uploaded < args.limit:
