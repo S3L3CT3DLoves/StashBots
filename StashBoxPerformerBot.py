@@ -38,7 +38,7 @@ def createPerformers(source : StashSource, destination : StashSource, uploads : 
     for upload in uploads:
         print(f"CrossPosting {upload['name']} from {source.name} to {destination.name}")
 
-        perfManager = StashBoxPerformerManager(stash, source, destination, cache=cache)
+        perfManager = StashBoxPerformerManager(stash, source, destination, sitesMapper=siteMapper, cache=cache)
         perfManager.getPerformer(upload['id'])
         createInput = perfManager.asPerformerEditDetailsInput()
         # Upload the images
@@ -167,8 +167,6 @@ def addStashBoxLinkPerformer(source : StashSource, destination : StashSource, pe
     Add a StashBox link to an existing performer
     """
 
-    print(f"Ready to update {performer['name']}")
-    
     perfManager = StashBoxPerformerManager(stash, source, destination, siteMapper)
     perfManager.setPerformer(performer)
     draft = perfManager.asPerformerEditDetailsInput()
@@ -191,12 +189,10 @@ def addStashBoxLinkPerformer(source : StashSource, destination : StashSource, pe
 
     try:
         perfManager.submitPerformerUpdate(performer["id"], draft, comment, False)
+        print(f"{performer['name']} updated")
     except Exception as e:
-        print("Error processing performer")
-        print(e)
-    
-
-    print(f"{performer['name']} updated")
+        print(f"Error processing performer {performer['name']}")
+        raise(e)
 
 def getPerformerUploadsFromStash(source : StashSource, destination : StashSource) -> List[PerformerUploadConfig]:
     sourceEndpointUrl = f"{StashBoxSitesMapper.SOURCE_INFOS[source]['url']}graphql"
@@ -437,12 +433,9 @@ if __name__ == '__main__':
         performersList = []
 
         print("Using local cache for TARGET (always on)")
-        targetCacheMgr.loadCache(True, 1, 2)
+        targetCacheMgr.loadCache(True, 12, 2)
 
-        print("Parsing list of performers to update")
-        performersList = filterPerformersForUpdate(targetCacheMgr.cache.getCache(), SOURCE, TARGET, True)
-        print(f"There are {len(performersList)} to review")
-
+        targetStashBox = []
         multiLink = []
         otherStashBox = []
         noLinks = []
@@ -457,17 +450,23 @@ if __name__ == '__main__':
                 if stashBoxUrls != []:
                     if len(stashBoxUrls) > 1:
                         multiLink.append({"id" : performer.get("id"), "name" : performer.get("name")})
-                    elif len(stashBoxUrls) == 1 and siteMapper.whichStashBoxLink(stashBoxUrls[0]["url"]) != TARGET:
+                    elif len(stashBoxUrls) == 1 and siteMapper.whichStashBoxLink(stashBoxUrls[0]["url"]) == SOURCE:
+                        targetStashBox.append({"id" : performer.get("id"), "name" : performer.get("name")})
+                    elif len(stashBoxUrls) == 1 and siteMapper.whichStashBoxLink(stashBoxUrls[0]["url"]) != SOURCE:
                         otherStashBox.append({"id" : performer.get("id"), "name" : performer.get("name")})
                 else:
                     noStashBox.append({"id" : performer.get("id"), "name" : performer.get("name")})
             else:
                 noLinks.append({"id" : performer.get("id"), "name" : performer.get("name")})
         
-        print(f"There are {len(multiLink)} performers with multiple links")
-        print(f"There are {len(otherStashBox)} performers with a link to a single other StashBox")
-        print(f"There are {len(noStashBox)} performers with no StashBox links")
-        print(f"There are {len(noLinks)} performers with no links at all")
+        statsTable = [
+            ["Linked to TARGET", len(targetStashBox)],
+            ["Links to multiple StashBoxes" , len(multiLink)],
+            ["Linked to another StashBox only", len(otherStashBox)],
+            ["No StashBox links", len(noStashBox)],
+            ["No links", len(noLinks)]
+        ]
+        print(tabulate(statsTable))
 
         with open("stats-nolinks.json", mode='w') as file:
             json.dump(noLinks, file)
@@ -522,8 +521,6 @@ if __name__ == '__main__':
             print(f"There are {len(noStashBox)} performers with no links to the source in the target")
         
         for performerA in sourceCacheMgr.cache.getCache():
-            if len(partialMatches) >= args.limit or len(matches) >= args.limit:
-                break
             if i%1000 == 0:
                 print(f"Searching... {i / len(sourceCacheMgr.cache.getCache()):.2%} in {time.time()-start:.2f}s")
             
@@ -565,6 +562,9 @@ if __name__ == '__main__':
                         continue
             i = i + 1
         
+        print(f"There are {len(matches)} exact matches")
+        print(f"There are {len(partialMatches)} partial matches")
+        sys.exit(0)
         if len(matches) > 0 or len(partialMatches) > 0:
             uploaded = 0
             if uploaded < args.limit:

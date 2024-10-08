@@ -580,7 +580,7 @@ class StashBoxPerformerManager:
 
         return draftCreate
     
-    def uploadPerformerImages(self, performer : t.Performer = None, existing : List[str] = [t.Image], removed : List[t.Image] = []) -> List[str]:
+    def uploadPerformerImages(self, performer : t.Performer = None, existing : List[t.Image] = [], removed : List[t.Image] = []) -> List[str]:
         """
         Uploads the images stored in performer['images'] to the destination StashBox instance
 
@@ -1010,27 +1010,22 @@ class StashBoxCacheManager:
                 self.cache.performers.append(perf)
             elif edit["operation"] == "DESTROY":
                 self.cache.deletePerformerById(targetPerformerId)
-            elif edit["operation"] == "MODIFY":
-                perf = self.updatePerformer(targetPerformerId, edit)
+            elif edit["operation"] == "MODIFY" or edit["operation"] == "MERGE":
+                performerIdx = self.cache._getPerformerIdxById(targetPerformerId)
+                if performerIdx == None:
+                    # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
+                    continue
+                self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.cache.performers[performerIdx], edit)
+                perf = self.cache.performers[performerIdx]
                 perf["updated"] = edit["closed"]
-            elif edit["operation"] == "MERGE":
-                mergedIds = list(map( lambda source: source["id"] ,edit["merge_sources"]))
-                print(f"Merging {mergedIds}")
-                perf = self.updatePerformer(targetPerformerId, edit)
-                perf["updated"] = edit["closed"]
-                for id in mergedIds:
-                    self.cache.deletePerformerById(id)
+
+                if edit["operation"] == "MERGE":
+                    mergedIds = list(map( lambda source: source["id"] ,edit["merge_sources"]))
+                    for id in mergedIds:
+                        self.cache.deletePerformerById(id)
         
         if self.saveToFile:
             self.saveCache()
 
     def saveCache(self):
         self.cache.saveCacheToFile()
-
-    def updatePerformer(self, performerId, edit : t.PerformerEdit) -> t.Performer:
-        performerIdx = self.cache._getPerformerIdxById(performerId)
-        if performerIdx == None:
-            # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
-            return
-        self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.cache.performers[performerIdx], edit)
-        return self.cache.performers[performerIdx]
