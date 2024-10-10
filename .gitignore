@@ -1,3 +1,4 @@
 *.json
+*.zlib
 *.pyc
 *_output.csv

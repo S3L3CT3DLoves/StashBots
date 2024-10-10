@@ -1,8 +1,11 @@
 from datetime import datetime
 import glob
 import json
+import os
 import re
+import time
 from typing import List
+import zlib
 from StashBoxHelperClasses import StashSource
 import schema_types as t
 
@@ -22,14 +25,17 @@ class StashBoxCache:
         return self.performers
     
     def loadCacheFromFile(self):
-        globName = f"{self.stashBoxInstance.name}_performers_cache_*.json"
+        globName = f"{self.stashBoxInstance.name}_performers_cache_*.json.zlib"
         earliest = datetime(2020,1,1,1,1,1)
+        toCleanup = []
         for name in glob.glob(globName):
-            dateGrabber = re.compile(".*performers_cache_(\d\d\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d).json")
+            dateGrabber = re.compile(r".*performers_cache_(\d\d\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d).json.zlib")
             dateStr = dateGrabber.match(name)
             fileDate = datetime(int(dateStr.group(1)), int(dateStr.group(2)), int(dateStr.group(3)), int(dateStr.group(4)), int(dateStr.group(5)))
             if fileDate > earliest:
                 earliest = fileDate
+            else:
+                toCleanup.append(name)
         
         self.cacheDate = earliest
         if earliest == datetime(2020,1,1,1,1,1):
@@ -37,10 +43,15 @@ class StashBoxCache:
             return
         
         dateCacheFile = earliest.strftime(STRFTIMEFORMAT)
-        filename = f"{self.stashBoxInstance.name}_performers_cache_{dateCacheFile}.json"
-        with open(filename, mode='r') as cache:
-            self.performers = json.load(cache)
+        filename = f"{self.stashBoxInstance.name}_performers_cache_{dateCacheFile}.json.zlib"
+        with open(filename, mode='rb') as cache:
+            fileData = zlib.decompress(cache.read(), zlib.MAX_WBITS|32).decode()
+            self.performers = json.loads(fileData)
         
+        # Cleanup old cache files
+        for filename in toCleanup:
+            os.remove(filename)
+
         print(f"Cache contains {len(self.performers)} entries")
 
     def getPerformerById(self, performerId) -> t.Performer:
@@ -66,7 +77,9 @@ class StashBoxCache:
 
     def saveCacheToFile(self):
         dateNow = datetime.now().strftime(STRFTIMEFORMAT)
-        filename = f"{self.stashBoxInstance.name}_performers_cache_{dateNow}.json"
+        filename = f"{self.stashBoxInstance.name}_performers_cache_{dateNow}.json.zlib"
         print(f"Saving cache to file: {filename}")
-        with open(filename, mode='w') as file:
-            json.dump(self.performers, file)
+        with open(filename, mode='wb') as file:
+            encoded = json.dumps(self.performers).encode()
+            compressed = zlib.compress(encoded)
+            file.write(compressed)
