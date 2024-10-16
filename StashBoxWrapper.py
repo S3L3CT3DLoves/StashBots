@@ -75,7 +75,12 @@ def handleGQLResponse(response):
         raise e
 
 def getImgB64(url):
-    return base64.b64encode(requests.get(url).content)
+    imageRequest = requests.get(url)
+    if imageRequest.status_code != 200:
+        print("Error getting image HTTP ", imageRequest.status_code)
+        return None
+    
+    return base64.b64encode(imageRequest.content)
 
 def resolveGQLFragments(gql, fragments):
     requiredFragments = []
@@ -245,11 +250,11 @@ def getOpenEdits(endpoint : Dict):
 
 def comparePerformers(performerA : t.Performer, performerB : t.Performer):
     returnCodes = []
-    for attr in ["name","gender","ethnicity","country","hair_color", "eye_color", "height", "breast_type", "disambiguation"]:
+    for attr in ["name","gender","ethnicity","country","hair_color", "eye_color", "height", "breast_type", "disambiguation", "career_end_year", "career_start_year", "cup_size", "band_size", "waist_size", "hip_size"]:
         valueA = performerA.get(attr)
         valueB = performerB.get(attr)
         if valueA and valueB:
-            if (isinstance(valueA, str) and valueA.lower() != valueB.lower()) and valueA != valueB:
+            if (isinstance(valueA, str) and valueA.lower() != valueB.lower()) or valueA != valueB:
                 # Values are different
                 returnCodes.append(ComparisonReturnCode[attr])
         elif valueA or valueB:
@@ -277,6 +282,14 @@ def comparePerformers(performerA : t.Performer, performerB : t.Performer):
     elif valueA and not valueB:
         returnCodes.append(ComparisonReturnCode.birth_date)
 
+    valueA = performerA.get("aliases")
+    valueB = performerB.get("aliases")
+    if valueA and valueB:
+        if set(valueA) != set(valueB):
+            returnCodes.append(ComparisonReturnCode.aliases)
+        
+    
+
     if len(returnCodes) == 0:
         returnCodes = [ComparisonReturnCode.IDENTICAL]
     return returnCodes
@@ -287,16 +300,19 @@ class StashBoxSitesMapper:
         StashSource.PMVSTASH : {
             "url" : "https://pmvstash.org/",
             "siteIds" : {},
+            "regex" : r"^https?:\/\/pmvstash\.org\/performers\/.+",
             "default_performer_link" : "1cda874a-bab4-44d8-b32b-c1e485e66b6f"
         },
         StashSource.STASHDB: {
             "url" : "https://stashdb.org/",
             "siteIds" : {},
+            "regex" : r"(https://stashdb\.org/performers/[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}",
             "default_performer_link" : None
         },
         StashSource.FANSDB : {
             "url" : "https://fansdb.cc/",
             "siteIds" : {},
+            "regex" : r"^https?:\/\/(?:www\.)?fansdb\.(?:cc|xyz)\/performers\/.+",
             "default_performer_link" : None
         }
     }
@@ -332,7 +348,7 @@ class StashBoxSitesMapper:
         """
         Returns True if the url matches the pattern for target
         """
-        return url.startswith(self.SOURCE_INFOS[target]['url'])
+        return re.match(self.SOURCE_INFOS[target]["regex"], url)
     
     def whichStashBoxLink(self, url : str) -> StashSource:
         """
@@ -605,7 +621,8 @@ class StashBoxPerformerManager:
         
         removedImgs = {}
         for img in removed:
-            removedImgs[getImgB64(img["url"])] = img["id"]
+            if img:
+                removedImgs[getImgB64(img["url"])] = img["id"]
 
         # Start with existing images
         for imgB64, id in existingImgs.items():
@@ -615,9 +632,12 @@ class StashBoxPerformerManager:
         for image in sourceImgs:
             counter +=1
             print(f"Uploading image {counter} of {len(sourceImgs)}")
-            imageId = upload_image(self.destinationEndpoint, image['url'], existingImgs)
-            if imageId:
-                imageIds.append(imageId["id"])
+            try:
+                imageId = upload_image(self.destinationEndpoint, image['url'], existingImgs)
+                if imageId:
+                    imageIds.append(imageId["id"])
+            except Exception as e:
+                print("Error uploading image")
         
         return imageIds
     
@@ -818,51 +838,55 @@ class StashBoxPerformerHistory:
 
     def compareAtDateTime(self, targetDate : datetime, compareTo : t.Performer) -> List[ComparisonReturnCode]:
         """
-        Returns True if the performer history at the target time is identical to compareTo
+        Returns a list of differences between the Performer at targetDate, and the compareTo performer. Only returns a difference code if a data change is detected, not if data is missing.
         """
         returnCodes = []
         localPerf = self.getByDateTime(targetDate)
 
         for attr in ["name","gender","ethnicity","country","eye_color","hair_color","height","hip_size","breast_type","career_start_year","career_end_year"]:
             valueA = compareTo.get(attr)
-            valueB = localPerf.get(attr)
-            if valueA and valueB:
-                if valueA != valueB:
+            historicalValue = localPerf.get(attr)
+            if valueA and historicalValue:
+                if valueA != historicalValue:
                     # Values are different
                     returnCodes.append(ComparisonReturnCode[attr])
-            elif valueA or valueB:
-                # Only one of the values exists
+            elif valueA and not historicalValue:
+                # There was no value but one was added, return diff
                 returnCodes.append(ComparisonReturnCode[attr])
         
         # Handle birthday separately, it's a mess due to the var change
         valueA = compareTo.get("birth_date", compareTo.get("birthdate"))
-        valueB = localPerf.get("birth_date", localPerf.get("birthdate"))
-        if valueA and valueB:
-            if valueA != valueB:
-                if len(valueA) != len(valueB):
+        historicalValue = localPerf.get("birth_date", localPerf.get("birthdate"))
+        if valueA and historicalValue:
+            if valueA != historicalValue:
+                if len(valueA) != len(historicalValue):
                     # One of the dates is a short date, the other is not
                     dateChecker = r"^(\d{4})-01-01"
                     if len(valueA) == 4:
-                        check = re.match(dateChecker, valueB)
+                        check = re.match(dateChecker, historicalValue)
                         if check and valueA != check.group(1):
                             returnCodes.append(ComparisonReturnCode.birth_date)
-                    elif len(valueB) == 4:
+                    elif len(historicalValue) == 4:
                         check = re.match(dateChecker, valueA)
-                        if check and valueB != check.group(1):
+                        if check and historicalValue != check.group(1):
                             returnCodes.append(ComparisonReturnCode.birth_date)
                 else:
                     returnCodes.append(ComparisonReturnCode.birth_date)
-        elif valueA and not valueB:
+        elif valueA and not historicalValue:
+            # There was no value but one was added, return diff
             returnCodes.append(ComparisonReturnCode.birth_date)
             
         for attr in ["disambiguation","cup_size","band_size","waist_size"]:
             # These are not properly passed when scraping & uploading, so not taking them into account if one is missing
             valueA = compareTo.get(attr)
-            valueB = localPerf.get(attr)
-            if valueA and valueB:
-                if valueA != valueB:
+            historicalValue = localPerf.get(attr)
+            if valueA and historicalValue:
+                if valueA != historicalValue:
                     # Values are different
                     returnCodes.append(ComparisonReturnCode[attr])
+            elif valueA and not historicalValue:
+                # There was no value but one was added, return diff
+                returnCodes.append(ComparisonReturnCode[attr])
         
         for attr in ["tatoos", "piercings"]:
             # These are not properly passed when scraping & uploading, so not taking them into account for now
@@ -871,10 +895,19 @@ class StashBoxPerformerHistory:
 
         # Compare aliases
         valueA = compareTo.get("aliases")
-        valueB = localPerf.get("aliases")
-        if valueA and valueB:
-            if set(valueA) != set(valueB):
+        historicalValue = localPerf.get("aliases")
+        if valueA and historicalValue:
+            valueASet = set(valueA)
+            historicalValueSet = set(historicalValue)
+            if len(historicalValueSet) > len(valueASet):
+                # Some aliases were removed, return diff
                 returnCodes.append(ComparisonReturnCode.aliases)
+            elif len(valueASet) > len(historicalValueSet) and historicalValueSet.issubset(valueASet):
+                # Some aliases were added, and some were removed
+                returnCodes.append(ComparisonReturnCode.aliases)
+            elif len(valueASet) == len(historicalValueSet) and valueASet != historicalValueSet:
+                returnCodes.append(ComparisonReturnCode.aliases)
+
         
         localImgs = localPerf.get("images", [])
         compareImgs = compareTo.get("images", [])

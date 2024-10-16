@@ -34,8 +34,6 @@ class StashBoxCache:
             fileDate = datetime(int(dateStr.group(1)), int(dateStr.group(2)), int(dateStr.group(3)), int(dateStr.group(4)), int(dateStr.group(5)))
             if fileDate > earliest:
                 earliest = fileDate
-            else:
-                toCleanup.append(name)
         
         self.cacheDate = earliest
         if earliest == datetime(2020,1,1,1,1,1):
@@ -47,10 +45,6 @@ class StashBoxCache:
         with open(filename, mode='rb') as cache:
             fileData = zlib.decompress(cache.read(), zlib.MAX_WBITS|32).decode()
             self.performers = json.loads(fileData)
-        
-        # Cleanup old cache files
-        for filename in toCleanup:
-            os.remove(filename)
 
         print(f"Cache contains {len(self.performers)} entries")
 

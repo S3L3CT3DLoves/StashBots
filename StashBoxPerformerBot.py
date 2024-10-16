@@ -78,7 +78,7 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
     
     if (hasUpdate or incomplete):
         compare = sourcePerformerHistory.compareAtDateTime(latestUpdateSource, performer)
-        if compare == [ComparisonReturnCode.IDENTICAL]:
+        if compare == [ComparisonReturnCode.IDENTICAL] or compare == [ComparisonReturnCode.images]:
             compareLatest = sourcePerformerHistory.compareAtDateTime(datetime.now(), performer)
             if compareLatest != [ComparisonReturnCode.IDENTICAL]:
                 print(f"Ready to update {performer['name']} : Performer { '/ has Update' if hasUpdate else '' } { '/ is incomplete' if incomplete else '' }")
@@ -93,9 +93,9 @@ def updatePerformer(source : StashSource, destination : StashSource, performer :
                     if normUrl not in justExistingLinks:
                         concatUrls.append(urlData)
 
-                #For some reason, sometimes there are empty URLs, so filter them out
+                #For some reason, sometimes there are empty URLs, so filter them out. Also remove circular references.
                 concatUrls = list(filter(
-                    lambda url : url != {},
+                    lambda url : url != {} and not siteMapper.isTargetStashBoxLink(url["url"], destination),
                     concatUrls
                 ))
                 updateInput["urls"] = concatUrls
@@ -188,7 +188,7 @@ def addStashBoxLinkPerformer(source : StashSource, destination : StashSource, pe
     
 
     try:
-        perfManager.submitPerformerUpdate(performer["id"], draft, comment, False)
+        perfManager.submitPerformerUpdate(performer["id"], draft, comment, True)
         print(f"{performer['name']} updated")
     except Exception as e:
         print(f"Error processing performer {performer['name']}")
@@ -274,20 +274,32 @@ def filterPerformersForUpdate(performersList : List[t.Performer], source : Stash
     return newList
 
 def userCheckPerformerComparison(targetPerformer, sourcePerformer):
-    comparison = sourcePerformer.compareAtDateTime(datetime.now(), targetPerformer.performer)
-    print(comparison)
+    comparison = comparePerformers(sourcePerformer, targetPerformer)
+    if comparison == [ComparisonReturnCode.IDENTICAL]:
+        # Not sure how that is possible, but it happens sometimes, due to diff between comparePerformers and compareAtDateTime
+        return True
 
     comparisonTable = []
     for attr in "name","gender","ethnicity","country":
-        comparisonTable.append([attr, targetPerformer.performer.get(attr), sourcePerformer.performer.get(attr)])
+        attrTitle = attr
+        if ComparisonReturnCode[attr] in comparison:
+            attrTitle = "[*]" + attrTitle
+        comparisonTable.append([attrTitle, targetPerformer.get(attr), sourcePerformer.get(attr)])
 
-    comparisonTable.append(["Birthdate", targetPerformer.performer.get("birth_date", targetPerformer.performer.get("birthdate")),sourcePerformer.performer.get("birth_date", sourcePerformer.performer.get("birthdate"))])
+    bdayTitle = "bday"
+    if ComparisonReturnCode.birth_date in comparison:
+        bdayTitle = "[*]" + bdayTitle
+    comparisonTable.append([bdayTitle, targetPerformer.get("birth_date", targetPerformer.get("birthdate")),sourcePerformer.get("birth_date", sourcePerformer.get("birthdate"))])
     
     for attr in "aliases", "disambiguation","breast_type","cup_size","band_size","waist_size", "eye_color","hair_color","height","hip_size","career_start_year","career_end_year":
-        comparisonTable.append([attr, targetPerformer.performer.get(attr), sourcePerformer.performer.get(attr)])
+        attrTitle = attr
+        if ComparisonReturnCode[attr] in comparison:
+            attrTitle = "[*]" + attrTitle
+        comparisonTable.append([attrTitle, targetPerformer.get(attr), sourcePerformer.get(attr)])
     
-    print(tabulate(comparisonTable, headers=['Attr', 'PMVStash', 'StashDB']))
-
+    print(tabulate(comparisonTable, headers=['Attr', 'Target', 'Source']))
+    userReturn = input("Are these the same performer? (y/N) ")
+    return userReturn.lower() == "y"
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -416,13 +428,25 @@ if __name__ == '__main__':
             )
         ))
         for perf in updateList:
+            if perf["targetId"] in performersWithOpenEdits:
+                print(f"Has Draft already {perf['name']}")
+                continue
             if perf["force"] != None and perf['force'].lower() == "true":
                 performerGetter = StashBoxPerformerManager(stash, TARGET, TARGET, siteMapper)
                 performerGetter.getPerformer(perf['targetId'])
-                if not perf["targetId"] in performersWithOpenEdits:
-                    manualUpdatePerformer(SOURCE, TARGET, performerGetter.performer, perf['sourceId'],args.comment)
+                manualUpdatePerformer(SOURCE, TARGET, performerGetter.performer, perf['sourceId'],args.comment)
+            elif perf["reason"] != None and "images" not in perf["reason"].split(";"):
+                perfTarget = StashBoxPerformerManager(stash, TARGET, TARGET, siteMapper)
+                perfTarget.getPerformer(perf['targetId'])
+
+                perfSource = StashBoxPerformerManager(stash, SOURCE, SOURCE, siteMapper)
+                perfSource.getPerformer(perf['sourceId'])
+
+                if userCheckPerformerComparison(perfTarget.performer, perfSource.performer):
+                    manualUpdatePerformer(SOURCE, TARGET, perfTarget.performer, perf['sourceId'],args.comment)
                 else:
-                    print(f"Has Draft already {perf['name']}")
+                    print(f"Not updating {perf['name']}")
+
             else:
                 print(f"Not updating {perf['name']}")
 
@@ -494,12 +518,11 @@ if __name__ == '__main__':
         for performer in targetCacheMgr.cache.getCache():
             if performer["id"] in performersWithOpenEdits:
                 # Don't edit performers with ongoing changes, to avoid conflicts
-                continue 
+                continue
+            if performer["deleted"]:
+                # Performer is deleted, skip
+                continue
             if performer.get("urls"):
-                if performer["deleted"]:
-                    # Performer is deleted, skip
-                    continue
-                
                 stashBoxUrls = [url for url in performer['urls'] if siteMapper.whichStashBoxLink(url["url"]) != None]
                 if stashBoxUrls != []:
                     continue
@@ -539,9 +562,8 @@ if __name__ == '__main__':
                             print(f"Found {performerB["name"]} in noStashBox")
                             matches.append((performerA.get("id"), performerB.get("id")))
 
-                        elif not args.exact and not ComparisonReturnCode.name in comp:
-                            userCheckPerformerComparison(performerB, performerA)
-                            partialMatches.append((performerA.get("id"), performerB.get("id")))
+                        elif not args.exact and not ComparisonReturnCode.gender in comp:
+                            partialMatches.append((performerA, performerB))
                     else:
                         #for now only extact matches are supported
                         continue
@@ -557,20 +579,24 @@ if __name__ == '__main__':
                         if comp == [ComparisonReturnCode.IDENTICAL]:
                             print(f"Found {performerB["name"]} in noLinks")
                             matches.append((performerA.get("id"), performerB.get("id")))
-                        elif not args.exact and not ComparisonReturnCode.name in comp:
-                            partialMatches.append((performerA.get("id"), performerB.get("id")))
+                        elif not args.exact and not ComparisonReturnCode.gender in comp:
+                            partialMatches.append((performerA, performerB))
                     else:
                         #for now only extact matches are supported
                         continue
             i = i + 1
         
-        if len(matches) > 0 or len(partialMatches) > 0:
+        if not args.exact and len(partialMatches) > 0:
+            for performerA, performerB in partialMatches:
+                if userCheckPerformerComparison(performerB, performerA):
+                    matches.append((performerA.get("id"), performerB.get("id")))
+
+        
+        if len(matches) > 0:
             uploaded = 0
+            print(f"Found {len(matches)} matches to upload")
             if uploaded < args.limit:
                 for sourcePerf, targetPerf in matches:
-                    addStashBoxLinkPerformer(StashSource.STASHDB, StashSource.PMVSTASH,targetCacheMgr.cache.getPerformerById(targetPerf),sourcePerf, "Add StashDB Link")
-                    uploaded = uploaded + 1
-                for sourcePerf, targetPerf in partialMatches:
                     addStashBoxLinkPerformer(StashSource.STASHDB, StashSource.PMVSTASH,targetCacheMgr.cache.getPerformerById(targetPerf),sourcePerf, "Add StashDB Link")
                     uploaded = uploaded + 1
             sys.exit(0)
