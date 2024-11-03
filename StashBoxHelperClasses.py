@@ -10,7 +10,7 @@ PerformerUploadConfig = TypedDict('PerformerUploadConfig', {
     'comment':str
 })
 
-def normalize_url(url):
+def normalise_url(url):
     # Parse the URL into components
     parsed_url = urlparse(url)
     

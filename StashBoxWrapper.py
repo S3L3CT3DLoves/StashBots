@@ -40,7 +40,7 @@ class ComparisonReturnCode(Enum):
     ERROR = -99
 
 def convertCountry(name):
-    if len(name) == 2:
+    if not name or len(name) == 2:
         return name
     STASHBOX_COUNTRY_MAP = {
         "USA": "US",
@@ -49,10 +49,15 @@ def convertCountry(name):
         "America": "US",
         "American": "US",
         "Czechia": "CZ",
+        "Czech Republic" : "CZ",
         "England": "GB",
         "United Kingdom": "GB",
         "Russia": "RU",
-        "Slovak Republic": "SK"
+        "Slovak Republic": "SK",
+        "Venezuela" : "VE",
+        "English" : "UK",
+        "Canadian, French Canadian" : "CA",
+        "Canadian" : "CA"
     }
     if name in STASHBOX_COUNTRY_MAP.keys():
         return STASHBOX_COUNTRY_MAP[name]
@@ -250,7 +255,7 @@ def getOpenEdits(endpoint : Dict):
 
 def comparePerformers(performerA : t.Performer, performerB : t.Performer):
     returnCodes = []
-    for attr in ["name","gender","ethnicity","country","hair_color", "eye_color", "height", "breast_type", "disambiguation", "career_end_year", "career_start_year", "cup_size", "band_size", "waist_size", "hip_size"]:
+    for attr in ["name","gender","ethnicity","hair_color", "eye_color", "height", "breast_type", "disambiguation", "career_end_year", "career_start_year", "cup_size", "band_size", "waist_size", "hip_size"]:
         valueA = performerA.get(attr)
         valueB = performerB.get(attr)
         if valueA and valueB:
@@ -260,6 +265,17 @@ def comparePerformers(performerA : t.Performer, performerB : t.Performer):
         elif valueA or valueB:
             # Only one of the values exists
             returnCodes.append(ComparisonReturnCode[attr])
+    
+    countryA = convertCountry(performerA.get("country"))
+    countryB = convertCountry(performerB.get("country"))
+    if countryA and countryB:
+        if countryA != countryB:
+            # Values are different
+            returnCodes.append(ComparisonReturnCode["country"])
+    elif valueA or valueB:
+        # Only one of the values exists
+        returnCodes.append(ComparisonReturnCode["country"])
+
     
     # Handle birthday separately, it's a mess due to the var change
     valueA = performerA.get("birth_date", performerA.get("birthdate"))
@@ -284,6 +300,12 @@ def comparePerformers(performerA : t.Performer, performerB : t.Performer):
 
     valueA = performerA.get("aliases")
     valueB = performerB.get("aliases")
+    # Cleanup Stashbox bug where aliases were not correctly split
+    if valueA and len(valueA) == 1 and "," in valueA[0]:
+        valueA = [x.strip() for x in valueA[0].split(",")]
+    if valueB and len(valueB) == 1 and "," in valueB[0]:
+        valueB = [x.strip() for x in valueB[0].split(",")]
+
     if valueA and valueB:
         if set(valueA) != set(valueB):
             returnCodes.append(ComparisonReturnCode.aliases)
@@ -306,7 +328,7 @@ class StashBoxSitesMapper:
         StashSource.STASHDB: {
             "url" : "https://stashdb.org/",
             "siteIds" : {},
-            "regex" : r"(https://stashdb\.org/performers/[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}",
+            "regex" : r"^https:\/\/stashdb\.org\/performers\/[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}",
             "default_performer_link" : None
         },
         StashSource.FANSDB : {
@@ -717,7 +739,7 @@ class StashBoxPerformerHistory:
             perfData : t.Performer = callGraphQL(self.endpoint,GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
             self.performer = perfData
 
-        edits = self.performer["edits"]
+        edits = self.performer.get("edits", [])
 
         if len(edits) == 0:
             # There are no Edits, an issue when the DB was imported initially // Create a fake Edit for the initial submit

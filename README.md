@@ -48,9 +48,20 @@ In Manual Update mode, the Bot will take a list of performers from a CSV file (f
 
 For all lines in the file where the last element is True, it will force the update of the performer, even if Update mode has failed it.
 
-This must only be used after a manual review of the list of performers has been done, to ensure no import data will be overwritten.
+**This must only be used after a manual review of the list of performers has been done, to ensure only identical performers have the True flag.**
 
-Because this operation can be destructive, it will not be send in BOT mode, and will show up a normal Edit in StashBox.
+Because this operation can be destructive, it will not be sent in BOT mode, and will show as a normal Edit in StashBox.
+
+Newer versions of the code have the additional features:
+- Images that were manually added to the Target will not be removed
+- Terminal mode has been introduced
+
+### Terminal Mode
+This is an advanced mode of Manual Update.
+
+A text comparison will be shown in the Terminal for review by the user. If the user confirms it, the performer will be considered as identical, and the update will be sent.
+
+This only applies for lines in the CSV file which do not have the True flag, and where images are identical.
 
 
 ## Stats Mode
@@ -59,9 +70,15 @@ In Stats mode, the Bot will identify the number of performers that have No Links
 ## Links Mode
 In Links mode, the Bot will compare the performer information in the TARGET with other StashBox instances, and add the link to the source if it exists.
 
-This can be used to add StashDB links to performers that were scrapped from there, but the link to the source was not added.
+Various checks are done automatically, to verify if the performer is identical.
 
-*Support for FansDB is coming.*
+If the performer is an Exact match, the program will automatically add the link to the SOURCE.
+
+If the performer is a Partial match, the user will be presented with a text comparison of the two performers, and asked to confirm if they are the same.
+
+**Exact** mode disables Partial matches, and can therefore run as a background task without user interraction.
+
+*It is recommended to first run the Exact mode, to add all certain matches. Then move on to manual review of Partial matches.*
 
 # StashBox Cache
 The bot features a full caching feature, to keep a local copy of all performers in a StashBox instance.
@@ -71,6 +88,8 @@ This is built to avoid overloading StashBox servers each time the bot runs.
 The cache update can take a while, this is *by design*, downloading a full cache can take between 400 and 6000+ API calls. To avoid overloading the StashBox server, each API call is delayed by 5 seconds.
 
 To speed things up, update your cache regularly (at least once a week), to benefit from the **refresh** feature. Which does not re-download all performers on the StahsBox server. It will grab all **Changes** (Edits) applied to performers since the last refresh, and apply them to the existing cache. This requires fewer API calls, making it a lot faster.
+
+*Newer versions of the bot use a compressed file to save the cache, to reduce storage requirements. Running the bot after the update may require a full re-download of the cache.*
 
 ## Updating the cache
 Updates are executed when you run **Update Mode**
