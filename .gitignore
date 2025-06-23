@@ -2,3 +2,4 @@
 *.zlib
 *.pyc
 *_output.csv
+*.ini

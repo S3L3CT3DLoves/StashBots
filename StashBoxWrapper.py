@@ -1,10 +1,9 @@
-import math, time, bisect, csv, re, base64
+import math, time, bisect, re, base64
 from copy import deepcopy
-from datetime import date, datetime, timedelta
+from datetime import  datetime, timedelta
 from enum import Enum
-from typing import Dict, List, NotRequired, TypedDict
+from typing import Dict, List
 from stashapi.classes import serialize_dict
-from stashapi.stashapp import StashInterface
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource
 import schema_types as t
@@ -122,6 +121,7 @@ def callGraphQL(stashBoxEndpoint, query, variables={}):
     return handleGQLResponse(response)
 
 def upload_image(destinationEndpoint, image_in, existing = {}, excluded = {}):
+    b64img_bytes = None
     if re.search(r';base64',image_in):
         m = re.search(r'data:(?P<mime>.+?);base64,(?P<img_data>.+)',image_in)
         mime = m.group("mime")
@@ -133,7 +133,7 @@ def upload_image(destinationEndpoint, image_in, existing = {}, excluded = {}):
         b64img_bytes = getImgB64(image_in)
         mime = 'image/jpeg'
 
-    if not b64img_bytes:
+    if b64img_bytes is None:
         raise Exception("upload_image requires a base64 string or url")
     
     if b64img_bytes in excluded.keys():
@@ -187,7 +187,7 @@ def getAllPerformers(sourceEndpoint : Dict, callback = None):
         print(f"GetAllPerformers page {query['page']} of {pages}")
 
         # Avoid overloading the server
-        time.sleep(2)
+        time.sleep(5)
         response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
         returnData.extend(response["performers"])
         if callback != None:
@@ -272,7 +272,7 @@ def comparePerformers(performerA : t.Performer, performerB : t.Performer):
         if countryA != countryB:
             # Values are different
             returnCodes.append(ComparisonReturnCode["country"])
-    elif valueA or valueB:
+    elif countryA or countryB:
         # Only one of the values exists
         returnCodes.append(ComparisonReturnCode["country"])
 
@@ -508,14 +508,11 @@ class StashBoxPerformerManager:
     """
     performer : t.Performer
     siteMapper : StashBoxSitesMapper
-    source : StashSource
-    destination : StashSource
-    stash : StashInterface
     sourceEndpoint = {}
     destinationEndpoint = {}
     cache : StashBoxCache
     
-    def __init__(self, stash : StashInterface, source : StashSource, destination : StashSource, sitesMapper : StashBoxSitesMapper = None, cache : StashBoxCache = None) -> None:
+    def __init__(self, sourceEndpoint, destinationEndpoint, sitesMapper : StashBoxSitesMapper = None, cache : StashBoxCache = None) -> None:
         """
         Initialises the Manager
 
@@ -527,11 +524,8 @@ class StashBoxPerformerManager:
         else:
             self.siteMapper = sitesMapper
         
-        self.source = source
-        self.destination = destination
-        self.stash = stash
-        self.sourceEndpoint = stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[source]['url'])
-        self.destinationEndpoint = stash.get_stashbox_connection(StashBoxSitesMapper.SOURCE_INFOS[destination]['url'])
+        self.sourceEndpoint = sourceEndpoint
+        self.destinationEndpoint = destinationEndpoint
         self.cache = cache
 
     def setPerformer(self, performer : t.Performer):
@@ -722,6 +716,7 @@ class StashBoxPerformerHistory:
     cache : StashBoxCache
     siteMapper : StashBoxSitesMapper
     removedImages : List[t.Image]
+    removedAliases : List[str]
 
     def __init__(self, stashBoxEndpoint : Dict, performerId : str, cache : StashBoxCache = None, siteMapper : StashBoxSitesMapper = None) -> None:
         self.endpoint = stashBoxEndpoint
@@ -730,11 +725,16 @@ class StashBoxPerformerHistory:
         self.cache = cache
         self.siteMapper = siteMapper if siteMapper != None else StashBoxSitesMapper()
         self.removedImages = []
+        self.removedAliases = []
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
         if self.cache != None:
-            self.performer = self.cache.getPerformerById(performerId)
+            try:
+                self.performer = self.cache.getPerformerById(performerId)
+            except Exception as e:
+                print("Error - Performer not in cache")
+                raise(e)
         else:
             perfData : t.Performer = callGraphQL(self.endpoint,GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
             self.performer = perfData
@@ -773,6 +773,13 @@ class StashBoxPerformerHistory:
                     removedImagesAtState = state['details'].get("removed_images")
                     if removedImagesAtState is not None:
                         self.removedImages.extend(removedImagesAtState)
+
+            # Grab list of aliases which have been removed from the performer
+            for state in self.performerEdits:
+                if self._checkStateChange(state):
+                    removedAliasAtState = state['details'].get("removed_aliases")
+                    if removedAliasAtState is not None:
+                        self.removedAliases.extend(removedAliasAtState)
         
         return
 
@@ -865,16 +872,27 @@ class StashBoxPerformerHistory:
         returnCodes = []
         localPerf = self.getByDateTime(targetDate)
 
-        for attr in ["name","gender","ethnicity","country","eye_color","hair_color","height","hip_size","breast_type","career_start_year","career_end_year"]:
+        for attr in ["name","gender","ethnicity","eye_color","hair_color","height","hip_size","breast_type","career_start_year","career_end_year"]:
             valueA = compareTo.get(attr)
             historicalValue = localPerf.get(attr)
             if valueA and historicalValue:
-                if valueA != historicalValue:
+                if (isinstance(valueA, str) and valueA.lower() != historicalValue.lower()) or valueA != historicalValue:
                     # Values are different
                     returnCodes.append(ComparisonReturnCode[attr])
             elif valueA and not historicalValue:
                 # There was no value but one was added, return diff
                 returnCodes.append(ComparisonReturnCode[attr])
+        
+        # Handle countries separately due to Full text / Country codes
+        countryA = convertCountry(compareTo.get("country"))
+        countryB = convertCountry(localPerf.get("country"))
+        if countryA and countryB:
+            if countryA != countryB:
+                # Values are different
+                returnCodes.append(ComparisonReturnCode["country"])
+        elif countryA or countryB:
+            # Only one of the values exists
+            returnCodes.append(ComparisonReturnCode["country"])
         
         # Handle birthday separately, it's a mess due to the var change
         valueA = compareTo.get("birth_date", compareTo.get("birthdate"))
@@ -903,7 +921,7 @@ class StashBoxPerformerHistory:
             valueA = compareTo.get(attr)
             historicalValue = localPerf.get(attr)
             if valueA and historicalValue:
-                if valueA != historicalValue:
+                if (isinstance(valueA, str) and valueA.lower() != historicalValue.lower()) or valueA != historicalValue:
                     # Values are different
                     returnCodes.append(ComparisonReturnCode[attr])
             elif valueA and not historicalValue:
@@ -945,11 +963,12 @@ class StashBoxPerformerHistory:
         # Due to Stash / StashBox incompatibilities, some values are not properly parsed when creating performers manually. Try to detect if the performer needs to be fixed
         localPerf = self.getByDateTime(targetDate)
 
-        for attr in ["disambiguation","tatoos", "piercings"]:
+        for attr in ["disambiguation","tatoos", "piercings","cup_size","band_size","waist_size"]:
             valueA = compareTo.get(attr)
             valueB = localPerf.get(attr)
             if valueB and not valueA:
                 # Value is missing
+                print(f"Missing: {attr}")
                 return True
 
         localBirthdate = localPerf.get("birthdate", localPerf.get("birth_date"))
@@ -959,11 +978,13 @@ class StashBoxPerformerHistory:
         if type(compareBirthdate) is dict:
             compareBirthdate = compareBirthdate["date"]
         if localBirthdate and not compareBirthdate:
+                print(f"Missing: birthday")
                 return True
         
         localImgs = localPerf.get("images", [])
         compareImgs = compareTo.get("images", [])
-        if len(localImgs) > len(compareImgs):
+        if len(localImgs) <= 1 and len(localImgs) > len(compareImgs):
+            print(f"Missing: images")
             return True
 
         
@@ -976,6 +997,7 @@ class StashBoxPerformerHistory:
         id = bisect.bisect_right(dates,targetDate)
         return id < len(dates)
     
+    @staticmethod
     def applyPerformerUpdate(currentPerformer : t.Performer, editChanges : t.PerformerEdit) -> t.Performer:
         newState = deepcopy(currentPerformer)
 
@@ -1012,10 +1034,13 @@ class StashBoxPerformerHistory:
 class StashBoxCacheManager:
     cache : StashBoxCache
     saveToFile = True
+    stashBoxConnectionParams = {}
+    
 
-    def __init__(self, stashBoxConnection : dict, stashBoxInstance : StashSource, saveToFile = True) -> None:
-        self.cache = StashBoxCache(stashBoxConnection, stashBoxInstance)
+    def __init__(self, stashBoxConnection : dict, saveToFile = True) -> None:
+        self.cache = StashBoxCache(stashBoxConnection['name'])
         self.saveToFile = saveToFile
+        self.stashBoxConnectionParams = stashBoxConnection
     
     def loadCache(self, useFile = True, limitHours = 24, refreshLimitDays = 7):
         if useFile:
@@ -1025,7 +1050,7 @@ class StashBoxCacheManager:
             self.loadCacheFromStashBox()
 
     def loadCacheFromStashBox(self):
-        self.cache.performers = getAllPerformers(self.cache.stashBoxConnectionParams)
+        self.cache.performers = getAllPerformers(self.stashBoxConnectionParams)
         self.cache.cacheDate = datetime.now()
 
     def updateCache(self, limitHours = 24, refreshLimitDays = 7):
@@ -1042,12 +1067,12 @@ class StashBoxCacheManager:
             print("Existing cache file is too old, grabbing a brand new one")
             self.loadCacheFromStashBox()
             if self.saveToFile:
-                self.saveCache()
+                self.cache.saveCacheToFile()
             return
         
         # Cache can be refreshed, load all the recent Edits and apply them
         print("Existing cache file is outdated, updating it with latest changes")
-        allEdits = getAllEdits(self.cache.stashBoxConnectionParams, refreshLimitDays)
+        allEdits = getAllEdits(self.stashBoxConnectionParams, refreshLimitDays)
         allEditsFiltered = list(filter(lambda edit: stashDateToDateTime(edit["closed"]) >= self.cache.cacheDate, allEdits))
         allEditsFiltered.reverse()
         print(f"{len(allEditsFiltered)} changes to process")
@@ -1080,7 +1105,7 @@ class StashBoxCacheManager:
                         self.cache.deletePerformerById(id)
         
         if self.saveToFile:
-            self.saveCache()
+            self.cache.saveCacheToFile()
 
     def saveCache(self):
         self.cache.saveCacheToFile()

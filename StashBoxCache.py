@@ -1,12 +1,9 @@
 from datetime import datetime
 import glob
 import json
-import os
 import re
-import time
 from typing import List
 import zlib
-from StashBoxHelperClasses import StashSource
 import schema_types as t
 
 STRFTIMEFORMAT = "%Y-%m-%d-%H-%M"
@@ -14,20 +11,17 @@ STRFTIMEFORMAT = "%Y-%m-%d-%H-%M"
 class StashBoxCache:
     performers = []
     stashBoxInstance = ""
-    stashBoxConnectionParams = {}
     cacheDate = datetime(2020,1,1,1,1,1)
 
-    def __init__(self, stashBoxConnection : dict, stashBoxInstance : StashSource) -> None:
-        self.stashBoxConnectionParams = stashBoxConnection
+    def __init__(self, stashBoxInstance : str) -> None:
         self.stashBoxInstance = stashBoxInstance
     
     def getCache(self) -> List[t.Performer]:
         return self.performers
     
     def loadCacheFromFile(self):
-        globName = f"{self.stashBoxInstance.name}_performers_cache_*.json.zlib"
+        globName = f"Cache/{self.stashBoxInstance}_performers_cache_*.json.zlib"
         earliest = datetime(2020,1,1,1,1,1)
-        toCleanup = []
         for name in glob.glob(globName):
             dateGrabber = re.compile(r".*performers_cache_(\d\d\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d).json.zlib")
             dateStr = dateGrabber.match(name)
@@ -41,7 +35,7 @@ class StashBoxCache:
             return
         
         dateCacheFile = earliest.strftime(STRFTIMEFORMAT)
-        filename = f"{self.stashBoxInstance.name}_performers_cache_{dateCacheFile}.json.zlib"
+        filename = f"Cache/{self.stashBoxInstance}_performers_cache_{dateCacheFile}.json.zlib"
         with open(filename, mode='rb') as cache:
             fileData = zlib.decompress(cache.read(), zlib.MAX_WBITS|32).decode()
             self.performers = json.loads(fileData)
@@ -71,7 +65,7 @@ class StashBoxCache:
 
     def saveCacheToFile(self):
         dateNow = datetime.now().strftime(STRFTIMEFORMAT)
-        filename = f"{self.stashBoxInstance.name}_performers_cache_{dateNow}.json.zlib"
+        filename = f"Cache/{self.stashBoxInstance}_performers_cache_{dateNow}.json.zlib"
         print(f"Saving cache to file: {filename}")
         with open(filename, mode='wb') as file:
             encoded = json.dumps(self.performers).encode()

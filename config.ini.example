@@ -1,0 +1,14 @@
+[GENERAL]
+stash_url = http://localhost:9999/
+
+[STASHDB]
+api_url = https://stashdb.org/graphql
+api_key = YOUR_KEY_HERE
+
+[PMVSTASH]
+api_url = https://pmvstash.org/graphql
+api_key = YOUR_KEY_HERE
+
+[OTHERSTASH]
+api_url = https://otherstash.org/graphql
+api_key = YOUR_KEY_HERE
