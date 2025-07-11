@@ -1,0 +1,5 @@
+[MASTER]
+disable=
+    broad-exception-caught,
+    missing-module-docstring,
+    line-too-long,

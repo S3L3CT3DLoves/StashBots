@@ -1,16 +1,22 @@
-import math, time, bisect, re, base64
+import base64
+import bisect
+import math
+import re
+import time
 from copy import deepcopy
-from datetime import  datetime, timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List
+
+import pycountry
+import requests
 from stashapi.classes import serialize_dict
+from urllib3 import encode_multipart_formdata
+
+import schema_types as t
+import StashBoxWrapperGQLQueries as GQLQ
 from StashBoxCache import StashBoxCache
 from StashBoxHelperClasses import PerformerUploadConfig, StashSource
-import schema_types as t
-import requests
-from urllib3 import encode_multipart_formdata
-import pycountry
-import StashBoxWrapperGQLQueries as GQLQ
 
 
 class ComparisonReturnCode(Enum):
@@ -366,18 +372,21 @@ class StashBoxSitesMapper:
                     "site_id" : destinationId
                 }
     
-    def isTargetStashBoxLink(self, url : str, target : StashSource) -> bool:
+    def is_link_to_instance(self, url : str, instance : StashSource) -> bool:
         """
         Returns True if the url matches the pattern for target
         """
-        return re.match(self.SOURCE_INFOS[target]["regex"], url)
+        # Temp fix, while I migrate everything to use str only
+        source = StashSource[instance] if isinstance(instance, str) else instance
+
+        return re.match(self.SOURCE_INFOS[source]["regex"], url)
     
     def whichStashBoxLink(self, url : str) -> StashSource:
         """
         If the url is a link to a StashBox page, return the appropriate StashSource
         """
         for source in self.SOURCE_INFOS.keys():
-            if self.isTargetStashBoxLink(url, source):
+            if self.is_link_to_instance(url, source):
                 return source
         
         return None

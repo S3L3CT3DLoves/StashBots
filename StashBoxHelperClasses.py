@@ -11,6 +11,7 @@ PerformerUploadConfig = TypedDict('PerformerUploadConfig', {
 })
 
 def normalise_url(url):
+    '''Returns a normalised URL to allow comparison'''
     # Parse the URL into components
     parsed_url = urlparse(url)
     
