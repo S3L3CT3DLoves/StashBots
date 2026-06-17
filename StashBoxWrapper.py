@@ -74,7 +74,7 @@ def handleGQLResponse(response):
     try:
         if response.status_code == 200:
             jsonData = response.json()
-            if "errors" in jsonData and jsonData["errors"] != None:
+            if "errors" in jsonData and jsonData["errors"] is not None:
                 print(f'Error in Stash call: {response.text}')
                 raise Exception(response.text)
             return jsonData['data']
@@ -142,6 +142,7 @@ def upload_image(destinationEndpoint, image_in, existing = {}, excluded = {}):
     if b64img_bytes is None:
         raise Exception("upload_image requires a base64 string or url")
     
+   
     if b64img_bytes in excluded.keys():
         print("Skipping image, removed")
         return
@@ -165,7 +166,7 @@ def upload_image(destinationEndpoint, image_in, existing = {}, excluded = {}):
         "ApiKey" : destinationEndpoint['api_key']
 	}
     
-    response = requests.post(destinationEndpoint['endpoint'], data=body, headers=request_headers)
+    response = requests.post(destinationEndpoint['endpoint'], data=body, headers=request_headers, timeout=30)
     return handleGQLResponse(response)["imageCreate"]
 
 def stashDateToDateTime(stashDate : str) -> datetime:
@@ -193,11 +194,20 @@ def getAllPerformers(sourceEndpoint : Dict, callback = None):
         print(f"GetAllPerformers page {query['page']} of {pages}")
 
         # Avoid overloading the server
-        time.sleep(5)
-        response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
-        returnData.extend(response["performers"])
-        if callback != None:
-            callback(response["performers"])
+        time.sleep(10)
+        try: 
+            response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
+            returnData.extend(response["performers"])
+            if callback is not None:
+                callback(response["performers"])
+        except TimeoutError:
+            # Wait a while and try again
+            time.sleep(60)
+            print(f"GetAllPerformers page {query['page']} of {pages} -- Retrying")
+            response = callGraphQL(sourceEndpoint, GQLQ.GET_ALL_PERFORMERS, {"input" : query})["queryPerformers"]
+            returnData.extend(response["performers"])
+            if callback is not None:
+                callback(response["performers"])
     
     return returnData
 
@@ -213,7 +223,7 @@ def getAllEdits(endpoint : Dict, limit = 7, callback = None):
         "per_page" : 100
     }
 
-    print(f"GetAllEdits page 1")
+    print("GetAllEdits page 1")
     response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
     returnData = response["edits"]
     pages = math.ceil(response["count"] / query["per_page"])
@@ -225,7 +235,7 @@ def getAllEdits(endpoint : Dict, limit = 7, callback = None):
         time.sleep(5)
         response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
         returnData.extend(response["edits"])
-        if callback != None:
+        if callback is not None:
             callback(response["edits"])
 
         if stashDateToDateTime(response["edits"][-1]["closed"]) < dateLimit:
@@ -241,10 +251,11 @@ def getOpenEdits(endpoint : Dict):
         "target_type" : "PERFORMER",
         "status" : "PENDING",
         "page" : 1,
+        "include_user_submitted" : True,
         "per_page" : 100
     }
 
-    print(f"GetOpenEdits page 1")
+    print("GetOpenEdits page 1")
     response = callGraphQL(endpoint, GQLQ.GET_ALL_PERFORMER_EDITS, {"input" : query})["queryEdits"]
     returnData = response["edits"]
     pages = math.ceil(response["count"] / query["per_page"])
@@ -550,7 +561,7 @@ class StashBoxPerformerManager:
         ### Returns
             The performer as a t.Performer
         """
-        if self.cache != None:
+        if self.cache is not None:
             self.performer = self.cache.getPerformerById(performerId)
         else:
             self.performer = callGraphQL(self.sourceEndpoint, GQLQ.GET_PERFORMER, {'input' : performerId})['findPerformer']
@@ -564,7 +575,7 @@ class StashBoxPerformerManager:
         ### Parameters
             - performer (t.Performer, optional): The performer that should be converted. (default: the stored performer)
         """
-        if performer == None:
+        if performer is None:
             performer = self.performer
 
         draftPerf : t.PerformerDraftInput = {}
@@ -596,7 +607,7 @@ class StashBoxPerformerManager:
         ### Parameters
             - performer (t.Performer, optional): The performer that should be converted. (default: the stored performer)
         """
-        if performer == None:
+        if performer is None:
             performer = self.performer
 
         draftCreate : t.PerformerEditDetailsInput = {}
@@ -632,7 +643,7 @@ class StashBoxPerformerManager:
             - existing ([t.Image], optional): List of already uploaded images, to keep all existing
             - existing ([t.Image], optional): List of images that were removed from the source, to remove them too
         """
-        if performer == None:
+        if performer is None:
             performer = self.performer
 
         imageIds = []
@@ -640,6 +651,7 @@ class StashBoxPerformerManager:
         sourceImgs = performer.get("images", [])
         
         print("Loading existing images")
+        
         existingImgs = {}
         for img in existing:
             existingImgs[getImgB64(img["url"])] = img["id"]
@@ -661,7 +673,7 @@ class StashBoxPerformerManager:
                 imageId = upload_image(self.destinationEndpoint, image['url'], existingImgs)
                 if imageId:
                     imageIds.append(imageId["id"])
-            except Exception as e:
+            except Exception:
                 print("Error uploading image")
         
         return imageIds
@@ -732,13 +744,13 @@ class StashBoxPerformerHistory:
         self.performerEdits = []
         self.performerStates = {}
         self.cache = cache
-        self.siteMapper = siteMapper if siteMapper != None else StashBoxSitesMapper()
+        self.siteMapper = siteMapper if siteMapper is not None else StashBoxSitesMapper()
         self.removedImages = []
         self.removedAliases = []
         self._getPerformerWithHistory(performerId)
         
     def _getPerformerWithHistory(self, performerId : str) -> t.Performer:
-        if self.cache != None:
+        if self.cache is not None:
             try:
                 self.performer = self.cache.getPerformerById(performerId)
             except Exception as e:
@@ -758,9 +770,9 @@ class StashBoxPerformerHistory:
             }
         else:
             createEdit = [edit for edit in edits if edit['operation'] == "CREATE"]
-            self.performerEdits = [edit for edit in edits if edit['operation'] in ["MODIFY", "MERGE"] and edit['applied'] == True]
+            self.performerEdits = [edit for edit in edits if edit['operation'] in ["MODIFY", "MERGE"] and edit['applied']]
             self.performerEdits.sort(key=lambda edit: stashDateToDateTime(edit['closed']))
-            if len(createEdit) > 0 and createEdit[0]["details"] != None:
+            if len(createEdit) > 0 and createEdit[0]["details"] is not None:
                 initial = createEdit[0]
             else:
                 # There is no CREATE edit, a known StashDB issue... Need to reverse the entire Edit chain
@@ -793,7 +805,7 @@ class StashBoxPerformerHistory:
         return
 
     def _checkStateChange(self, changes : t.PerformerEdit) -> bool:
-        if changes["details"] == None:
+        if changes["details"] is None:
             return True
         # Checks if there are **applicable** changes in the Edit
         for attr in ["name","disambiguation","gender","birthdate", "birth_date","ethnicity","country","eye_color","hair_color","height","cup_size","band_size","waist_size","hip_size","breast_type","career_start_year","career_end_year"]:
@@ -824,11 +836,11 @@ class StashBoxPerformerHistory:
 
         # Init arrays if they are "None"
         for attr in ["aliases", "tattoos", "piercings", "images", "urls"]:
-            if firstState[attr] == None:
+            if firstState[attr] is None:
                 firstState[attr] = []
 
         for edit in allEdits:
-            if edit["details"] == None:
+            if edit["details"] is None:
                 # Some Edits don't have any changes except a MERGE action
                 continue
 
@@ -847,7 +859,7 @@ class StashBoxPerformerHistory:
             for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:
                 if edit['details'].get(attr):
                     for x in edit['details'].get(attr):
-                        if x != None:
+                        if x is not None:
                             firstState[attr.split('_')[1]].append(x)
         
         for attr in ["removed_aliases", "removed_tattoos", "removed_piercings", "removed_images", "removed_urls"]:
@@ -987,8 +999,8 @@ class StashBoxPerformerHistory:
         if type(compareBirthdate) is dict:
             compareBirthdate = compareBirthdate["date"]
         if localBirthdate and not compareBirthdate:
-                print(f"Missing: birthday")
-                return True
+            print(f"Missing: birthday")
+            return True
         
         localImgs = localPerf.get("images", [])
         compareImgs = compareTo.get("images", [])
@@ -1033,10 +1045,10 @@ class StashBoxPerformerHistory:
         
         if editChanges['details'].get("removed_images"):
             for x in editChanges['details'].get("removed_images"):
-                    if x == None:
-                        continue
-                    existingImg = [img for img in newState["images"] if img and img["id"] == x["id"]][0]
-                    newState["images"].remove(existingImg)
+                if x is None:
+                    continue
+                existingImg = [img for img in newState["images"] if img and img["id"] == x["id"]][0]
+                newState["images"].remove(existingImg)
         
         return newState
     
@@ -1101,7 +1113,7 @@ class StashBoxCacheManager:
                 self.cache.deletePerformerById(targetPerformerId)
             elif edit["operation"] == "MODIFY" or edit["operation"] == "MERGE":
                 performerIdx = self.cache._getPerformerIdxById(targetPerformerId)
-                if performerIdx == None:
+                if performerIdx is None:
                     # Perf can be None if it was recently merged / deleted and an Edit was already in the queue for it. In that case, ignore it
                     continue
                 self.cache.performers[performerIdx] = StashBoxPerformerHistory.applyPerformerUpdate(self.cache.performers[performerIdx], edit)

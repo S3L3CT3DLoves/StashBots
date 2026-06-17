@@ -43,8 +43,8 @@ For all lines in the file where the last element is True, it will force the upda
 Because this operation can be destructive, it will not be sent in BOT mode, and will show as a normal Edit in StashBox.
 
 Newer versions of the code have the additional features:
-- Images that were manually added to the Target will not be removed
-- Terminal mode has been introduced
+- Images are only removed if there was an explicit removal on Source (ensure manually added images on Target are never changed by the Bot)
+- Aliases are ADD only
 
 ### Terminal Mode
 This is an advanced mode of Manual Update.

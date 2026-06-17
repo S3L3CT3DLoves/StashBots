@@ -145,7 +145,8 @@ def manual_update_performer(source_endpoint, destination_endpoint, target_perfor
     '''
     ### Summary
     Force update of a Performer based on the source and sourceId, not performing any checks.
-    Explicitely designed to NOT remove images and aliases, unless those were removed from Source.
+    Explicitely designed to NOT remove images unless those were removed from Source.
+    Explicitely designed to ONLY ADD aliases, removals must be handled manually to avoid data loss.
     '''
 
     print(f"Ready to update {target_performer['name']}")
@@ -153,6 +154,13 @@ def manual_update_performer(source_endpoint, destination_endpoint, target_perfor
     source_performer_manager = StashBoxPerformerManager(
         source_endpoint, destination_endpoint, SITEMAPPER, cache=cache)
     source_performer_manager.getPerformer(source_id)
+    try:
+        source_performer_history = StashBoxPerformerHistory(
+            source_endpoint, source_id, cache, SITEMAPPER)
+    except Exception:
+        print(f"{target_performer['name']} --- Error while retrieving SOURCE history --- !!!")
+        return ReturnCode.ERROR
+
     draft = source_performer_manager.asPerformerEditDetailsInput()
 
     # Add url to source, in case it's not there yet
@@ -162,11 +170,16 @@ def manual_update_performer(source_endpoint, destination_endpoint, target_perfor
     })
     draft["urls"] = concat_urls(destination_endpoint['name'], target_performer["urls"], draft["urls"])
 
+    # Only perform ADD on aliases, too many differences in the guidelines, was causing issues
+    draft["aliases"] = target_performer["aliases"]
+    for alias in source_performer_manager.performer['aliases']:
+        if alias not in draft["aliases"]:
+            draft['aliases'].append(alias)
+
     try:
-        existing_images = list(map(lambda x: x["id"], target_performer.get("images")))
         new_images = source_performer_manager.uploadPerformerImages(
-            existing=target_performer.get("images", []))
-        draft["image_ids"] = existing_images + new_images
+            existing=target_performer.get("images", []), removed=source_performer_history.removedImages)
+        draft["image_ids"] = new_images
         source_performer_manager.submitPerformerUpdate(target_performer["id"], draft, comment, bot)
     except Exception as e:
         print("Error processing performer")
@@ -175,7 +188,7 @@ def manual_update_performer(source_endpoint, destination_endpoint, target_perfor
     print(f"{target_performer['name']} updated")
 
 
-def filter_performers_for_update(performer_list: List[t.Performer], source_endpoint, verbose=False) -> List[t.Performer]:
+def filter_performers_for_update(performer_list: List[t.Performer], source_endpoint, target_endpoint, verbose=False) -> List[t.Performer]:
     '''
     Filters a list of performers to remove those that:
     - already have open Edits
@@ -186,7 +199,7 @@ def filter_performers_for_update(performer_list: List[t.Performer], source_endpo
     '''
 
     new_list = []
-    open_edits = getOpenEdits(source_endpoint)
+    open_edits = getOpenEdits(target_endpoint)
     performers_with_open_edits = list(map(
         lambda edit: edit["target"]["id"],
         filter(
@@ -306,7 +319,7 @@ def add_stashbox_link_to_performer(source_endpoint, destination_endpoint, target
 
     try:
         performer_namager.submitPerformerUpdate(
-            target_performer["id"], draft, comment, True)
+            target_performer["id"], draft, comment, False)
         print(f"{target_performer['name']} updated")
     except Exception as e:
         print(f"Error processing performer {target_performer['name']}")
@@ -348,8 +361,6 @@ def configure_argparse():
         "manual", parents=[general_parser], help="")
     manual_parser.add_argument("-i", "--input-file", help="Input csv file containing the performers to be updated",
                               type=argparse.FileType('r', encoding='UTF-8'))
-    manual_parser.add_argument(
-        "-t", "--terminal", help="Show text comparisons in the terminal for user review", action="store_true")
 
     links_parser = subparsers.add_parser(
         "links", parents=[general_parser], help="")
@@ -357,6 +368,7 @@ def configure_argparse():
         "-l", "--limit", help="Maximum number of edits allowed", type=int, default=10)
     links_parser.add_argument("-m", "--mode", help="Mode",
                              choices=['NOLINKS', 'NOSTASHBOX', 'ALL'], default="NOLINKS")
+    links_parser.add_argument("-s", "--save-file", help="File where the false positives are saved to avoid repeating next run", type=argparse.FileType('r+', encoding='UTF-8'), required=True)
     links_parser.add_argument(
         "-e", "--exact", help="Only use exact matches", action="store_true")
     links_parser.add_argument(
@@ -410,7 +422,7 @@ if __name__ == '__main__':
         performers_list = []
 
         print("Using local cache for TARGET (always on)")
-        target_cache_manager.loadCache(True, 24, 7)
+        target_cache_manager.loadCache(True, 12, 7)
         source_cache_manager = StashBoxCacheManager(
             SOURCE_ENDPOINT,  True) if args.source_cache else None
         if source_cache_manager is not None:
@@ -419,7 +431,7 @@ if __name__ == '__main__':
 
         print("Parsing list of performers to update")
         performers_list = filter_performers_for_update(
-            target_cache_manager.cache.getCache(), SOURCE_ENDPOINT)
+            target_cache_manager.cache.getCache(), SOURCE_ENDPOINT, TARGET_ENDPOINT)
         print(f"There are {len(performers_list)} to review")
 
         # Now actually do the update
@@ -474,22 +486,7 @@ if __name__ == '__main__':
                     TARGET_ENDPOINT, None, SITEMAPPER)
                 performerGetter.getPerformer(perf['targetId'])
                 manual_update_performer(SOURCE_ENDPOINT, TARGET_ENDPOINT,
-                                      performerGetter.performer, perf['sourceId'], args.comment, bot=True)
-            elif args.terminal and perf["reason"] is not None and "images" not in perf["reason"].split(";"):
-                perfTarget = StashBoxPerformerManager(
-                    TARGET_ENDPOINT, None, SITEMAPPER)
-                perfTarget.getPerformer(perf['targetId'])
-
-                perfSource = StashBoxPerformerManager(
-                    SOURCE_ENDPOINT, None, SITEMAPPER)
-                perfSource.getPerformer(perf['sourceId'])
-
-                if console_confirm_performer_comparison(perfTarget.performer, perfSource.performer):
-                    manual_update_performer(SOURCE_ENDPOINT, TARGET_ENDPOINT,
-                                          perfTarget.performer, perf['sourceId'], args.comment, bot=True)
-                else:
-                    print(f"Not updating {perf['name']}")
-
+                                      performerGetter.performer, perf['sourceId'], args.comment, bot=False)
             else:
                 print(f"Not updating {perf['name']}")
 
@@ -543,59 +540,76 @@ if __name__ == '__main__':
             print(
                 f"There are {len(noStashBox)} performers with no links to the source in the target")
 
-        for performerA in source_cache_manager.cache.getCache():
-            if len(matches) >= args.limit:
-                break
+        previous_decisions_reader = list(csv.DictReader(args.save_file, fieldnames=[
+                                            'targetId', 'sourceId']))
+        decision_writer = csv.DictWriter(args.save_file, fieldnames=[
+                                        'targetId', 'sourceId'])
 
-            # Display progress
-            if i % 1000 == 0:
-                print(
-                    f"Searching... {i / len(source_cache_manager.cache.getCache()):.2%} in {time.time()-start:.2f}s")
+        try:
+            for performerA in source_cache_manager.cache.getCache():
+                if len(matches) >= args.limit:
+                    break
 
-            # Skip X% of the DB, to save time when using a low limit and calling the function several times
-            if i*100 / len(source_cache_manager.cache.getCache()) < args.skip:
+                # Display progress
+                if i % 1000 == 0:
+                    print(
+                        f"Searching... {i / len(source_cache_manager.cache.getCache()):.2%} in {time.time()-start:.2f}s")
+
+                # Skip X% of the DB, to save time when using a low limit and calling the function several times
+                if i*100 / len(source_cache_manager.cache.getCache()) < args.skip:
+                    i = i + 1
+                    continue
+
+                if args.mode == "ALL" or args.mode == "NOSTASHBOX":
+                    for performerB in noStashBox:
+                        if performerB.get("name").lower() == performerA.get("name").lower():
+                            comp = comparePerformers(performerA, performerB)
+                            if comp == [ComparisonReturnCode.IDENTICAL]:
+                                print(f"Found {performerB["name"]} in noStashBox")
+                                matches.append(
+                                    (performerA.get("id"), performerB.get("id")))
+                            elif not args.exact and ComparisonReturnCode.gender not in comp:
+                                in_save_file = [record for record in previous_decisions_reader if (record["targetId"] == performerB["id"] or record["targetId"] == "*") and (record["sourceId"] == performerA["id"] or record["sourceId"]=="*")]
+                                if len(in_save_file) == 0:
+                                    if console_confirm_performer_comparison(performerB, performerA):
+                                        matches.append(
+                                            (performerA.get("id"), performerB.get("id")))
+                                    else:
+                                        decision_writer.writerow({"targetId": performerB["id"], "sourceId": performerA["id"]})
+                        else:
+                            # for now only name matches are supported
+                            continue
+
+                if args.mode == "ALL" or args.mode == "NOLINKS":
+                    for performerB in noLinks:
+                        if performerB.get("name").lower() == performerA.get("name").lower():
+                            comp = comparePerformers(performerA, performerB)
+                            if comp == [ComparisonReturnCode.IDENTICAL]:
+                                print(f"Found {performerB["name"]} in noLinks")
+                                matches.append(
+                                    (performerA.get("id"), performerB.get("id")))
+                            elif not args.exact and ComparisonReturnCode.gender not in comp:
+                                in_save_file = [record for record in previous_decisions_reader if (record["targetId"] == performerB["id"] or record["targetId"] == "*") and (record["sourceId"] == performerA["id"] or record["sourceId"]=="*")]
+                                if len(in_save_file) == 0:
+                                    if console_confirm_performer_comparison(performerB, performerA):
+                                        matches.append(
+                                            (performerA.get("id"), performerB.get("id")))
+                                    else:
+                                        decision_writer.writerow({"targetId": performerB["id"], "sourceId": performerA["id"]})
+                        else:
+                            # for now only name matches are supported
+                            continue
                 i = i + 1
-                continue
 
-            if args.mode == "ALL" or args.mode == "NOSTASHBOX":
-                for performerB in noStashBox:
-                    if performerB.get("name").lower() == performerA.get("name").lower():
-                        comp = comparePerformers(performerA, performerB)
-                        if comp == [ComparisonReturnCode.IDENTICAL]:
-                            print(f"Found {performerB["name"]} in noStashBox")
-                            matches.append(
-                                (performerA.get("id"), performerB.get("id")))
-                        elif not args.exact and ComparisonReturnCode.gender not in comp:
-                            if console_confirm_performer_comparison(performerB, performerA):
-                                matches.append(
-                                    (performerA.get("id"), performerB.get("id")))
-                    else:
-                        # for now only name matches are supported
-                        continue
-
-            if args.mode == "ALL" or args.mode == "NOLINKS":
-                for performerB in noLinks:
-                    if performerB.get("name").lower() == performerA.get("name").lower():
-                        comp = comparePerformers(performerA, performerB)
-                        if comp == [ComparisonReturnCode.IDENTICAL]:
-                            print(f"Found {performerB["name"]} in noLinks")
-                            matches.append(
-                                (performerA.get("id"), performerB.get("id")))
-                        elif not args.exact and ComparisonReturnCode.gender not in comp:
-                            if console_confirm_performer_comparison(performerB, performerA):
-                                matches.append(
-                                    (performerA.get("id"), performerB.get("id")))
-                    else:
-                        # for now only name matches are supported
-                        continue
-            i = i + 1
-
-        if len(matches) > 0:
-            UP_COUNT = 0
-            print(f"Found {len(matches)} matches to upload")
-            if UP_COUNT < args.limit:
-                for sourcePerf, targetPerf in matches:
-                    add_stashbox_link_to_performer(SOURCE_ENDPOINT, TARGET_ENDPOINT,
-                                             target_cache_manager.cache.getPerformerById(targetPerf), sourcePerf, args.comment)
-                    UP_COUNT = UP_COUNT + 1
-            sys.exit(0)
+            if len(matches) > 0:
+                UP_COUNT = 0
+                print(f"Found {len(matches)} matches to upload")
+                if UP_COUNT < args.limit:
+                    for sourcePerf, targetPerf in matches:
+                        add_stashbox_link_to_performer(SOURCE_ENDPOINT, TARGET_ENDPOINT,
+                                            target_cache_manager.cache.getPerformerById(targetPerf), sourcePerf, args.comment)
+                        UP_COUNT = UP_COUNT + 1
+                args.save_file.close()
+                sys.exit(0)
+        except KeyboardInterrupt:
+            args.save_file.close()

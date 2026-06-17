@@ -1,6 +1,7 @@
 from datetime import datetime
 import glob
 import json
+import os
 import re
 from typing import List
 import zlib
@@ -43,12 +44,8 @@ class StashBoxCache:
         print(f"Cache contains {len(self.performers)} entries")
 
     def getPerformerById(self, performerId) -> t.Performer:
-        result = None
-        try:
-            result = [perf for perf in self.performers if perf["id"] == performerId][0]
-        except:
-            pass
-        return result
+        # Return the first performer matching the id, or None if not found
+        return next((perf for perf in self.performers if perf.get("id") == performerId), None)
     
     def _getPerformerIdxById(self, performerId) -> t.Performer:
         result = None
@@ -67,6 +64,7 @@ class StashBoxCache:
         dateNow = datetime.now().strftime(STRFTIMEFORMAT)
         filename = f"Cache/{self.stashBoxInstance}_performers_cache_{dateNow}.json.zlib"
         print(f"Saving cache to file: {filename}")
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, mode='wb') as file:
             encoded = json.dumps(self.performers).encode()
             compressed = zlib.compress(encoded)
